@@ -21,7 +21,10 @@ def _parse_dates(data_frame: pd.DataFrame, column: str) -> pd.DataFrame:
 def _filter_by_date(data_frame: pd.DataFrame, column: str, start: date, end: date) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
-    return data_frame[(data_frame[column] >= start) & (data_frame[column] <= end)]
+    series = pd.to_datetime(data_frame[column], errors="coerce")
+    start_ts = pd.to_datetime(start)
+    end_ts = pd.to_datetime(end)
+    return data_frame[(series >= start_ts) & (series <= end_ts)]
 
 
 def render() -> None:
