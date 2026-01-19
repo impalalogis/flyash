@@ -101,7 +101,10 @@ def render() -> None:
         st.info("Add labour in Master Data before marking attendance.")
         return
 
-    labour_df = utils.ensure_columns(labour_df, ["Labour_ID", "Name", "Active_Status"])
+    labour_df = utils.ensure_columns(
+        labour_df,
+        ["Labour_ID", "Name", "Active_Status", "Daily_Wage"],
+    )
     active_labour = _active_labour(labour_df)
     if active_labour.empty:
         st.info("No active labour found. Update Active Status in Master Data.")
