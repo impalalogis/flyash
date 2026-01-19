@@ -88,8 +88,15 @@ def _sync_production_log(
         }
         if not str(row.get("Labour_Payment_Date", "")).strip():
             update_data["Labour_Payment_Date"] = date_str
-        database.update_row("Production_Log", prod_id, update_data)
+        database.update_row(
+            "Production_Log",
+            prod_id,
+            update_data,
+            recompute_stock=False,
+        )
         updated_rows += 1
+    if updated_rows:
+        database.update_stock_log()
     return False, updated_rows
 
 
@@ -101,7 +108,10 @@ def render() -> None:
         st.info("Add labour in Master Data before marking attendance.")
         return
 
-    labour_df = utils.ensure_columns(labour_df, ["Labour_ID", "Name", "Active_Status"])
+    labour_df = utils.ensure_columns(
+        labour_df,
+        ["Labour_ID", "Name", "Active_Status", "Daily_Wage"],
+    )
     active_labour = _active_labour(labour_df)
     if active_labour.empty:
         st.info("No active labour found. Update Active Status in Master Data.")

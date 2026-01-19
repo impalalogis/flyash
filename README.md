@@ -12,6 +12,7 @@ Create a Google Sheet and add the following tabs (case-sensitive):
 - `Customers`
 - `Labour`
 - `Labour_Attendance`
+- `Stock_Log`
 - `Raw_Material_Log`
 - `Production_Log`
 - `Sales_Log`
@@ -50,6 +51,15 @@ Add the following header row (row 1) for each tab:
 - Labour_ID
 - Name
 - Status
+
+**Stock_Log**
+- Date
+- Month
+- Material
+- Opening
+- Inward
+- Consumed
+- Closing
 
 **Raw_Material_Log**
 - RM_ID

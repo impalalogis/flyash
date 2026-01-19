@@ -9,6 +9,7 @@ from views import (
     labour_attendance,
     master_data,
     payments,
+    stock,
 )
 
 
@@ -42,6 +43,7 @@ def main() -> None:
         "Sales Entry": entry_sales.render,
         "Payments": payments.render,
         "Labour Attendance": labour_attendance.render,
+        "Stock": stock.render,
         "Master Data": master_data.render,
     }
 
