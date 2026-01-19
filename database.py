@@ -39,11 +39,25 @@ def _extract_spreadsheet_id(value: str) -> str:
 
 
 def _get_spreadsheet_id() -> str:
-    gsheets = st.secrets.get("gsheets", {})
-    spreadsheet_id = gsheets.get("spreadsheet_id") or gsheets.get("spreadsheet_url")
-    if not spreadsheet_id:
+    config = get_gsheets_config()
+    spreadsheet_value = config["spreadsheet_id"] or config["spreadsheet_url"]
+    if not spreadsheet_value:
         raise ValueError("Missing gsheets.spreadsheet_id or gsheets.spreadsheet_url")
-    return _extract_spreadsheet_id(spreadsheet_id)
+    return config["resolved_id"]
+
+
+def get_gsheets_config() -> dict[str, str]:
+    gsheets = st.secrets.get("gsheets", {})
+    spreadsheet_id = str(gsheets.get("spreadsheet_id", "")).strip()
+    spreadsheet_url = str(gsheets.get("spreadsheet_url", "")).strip()
+    resolved = ""
+    if spreadsheet_id or spreadsheet_url:
+        resolved = _extract_spreadsheet_id(spreadsheet_id or spreadsheet_url)
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "spreadsheet_url": spreadsheet_url,
+        "resolved_id": resolved,
+    }
 
 
 @st.cache_resource

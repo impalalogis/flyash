@@ -147,6 +147,13 @@ from the JSON key (the `client_email` field).
 3. Set either `gsheets.spreadsheet_id` or `gsheets.spreadsheet_url`.
 4. Keep `private_key` on a single line with `\n` for new lines.
 
+## Deploying on Streamlit Cloud
+1. Open your app settings in Streamlit Cloud.
+2. In "Secrets", paste the same content you would place in
+   `.streamlit/secrets.toml`.
+3. Ensure the `gsheets` block includes `spreadsheet_id` or `spreadsheet_url`.
+4. Re-deploy the app after saving secrets.
+
 ## Run the app
 1. Install dependencies:
    - `pip install -r requirements.txt`
