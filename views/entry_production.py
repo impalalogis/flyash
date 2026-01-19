@@ -70,3 +70,32 @@ def render() -> None:
         data = {key: data.get(key, "") for key in PRODUCTION_COLUMNS}
         database.insert_row("Production_Log", data)
         st.success("Production entry saved.")
+
+    st.subheader("Production Entries")
+    entries = database.read_table("Production_Log")
+    if entries.empty:
+        st.info("No production entries yet.")
+        return
+    if "Prod_ID" not in entries.columns:
+        st.error("Missing Prod_ID column in Production_Log.")
+        return
+
+    display_entries = entries.copy()
+    display_entries["Delete"] = False
+    display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
+    edited = st.data_editor(
+        display_entries,
+        use_container_width=True,
+        disabled=[col for col in display_entries.columns if col != "Delete"],
+        key="production_entries",
+    )
+
+    if st.button("Delete selected", key="production_delete"):
+        selected = edited.loc[edited["Delete"] == True, "Prod_ID"].dropna().astype(str).tolist()
+        if not selected:
+            st.warning("Select at least one entry to delete.")
+        else:
+            for prod_id in selected:
+                database.delete_row("Production_Log", prod_id)
+            st.success("Selected entries deleted.")
+            st.rerun()
