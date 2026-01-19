@@ -14,6 +14,18 @@ from views import (
 
 
 def _init_connection() -> None:
+    config = database.get_gsheets_config()
+    with st.sidebar.expander("GSheets config", expanded=False):
+        show_full = st.checkbox("Show full values", value=False, key="show_gsheets_config")
+
+        def _mask(value: str) -> str:
+            if not value:
+                return "-"
+            return value if show_full or len(value) <= 10 else f"...{value[-10:]}"
+
+        st.write(f"spreadsheet_id: {_mask(config['spreadsheet_id'])}")
+        st.write(f"spreadsheet_url: {_mask(config['spreadsheet_url'])}")
+        st.write(f"resolved_id: {_mask(config['resolved_id'])}")
     try:
         database.get_spreadsheet()
         st.sidebar.success("Connected to Google Sheets")
