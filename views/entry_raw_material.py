@@ -138,3 +138,32 @@ def render() -> None:
         data = {key: data.get(key, "") for key in RAW_MATERIAL_COLUMNS}
         database.insert_row("Raw_Material_Log", data)
         st.success("Raw material entry saved.")
+
+    st.subheader("Raw Material Entries")
+    entries = database.read_table("Raw_Material_Log")
+    if entries.empty:
+        st.info("No raw material entries yet.")
+        return
+    if "RM_ID" not in entries.columns:
+        st.error("Missing RM_ID column in Raw_Material_Log.")
+        return
+
+    display_entries = entries.copy()
+    display_entries["Delete"] = False
+    display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
+    edited = st.data_editor(
+        display_entries,
+        use_container_width=True,
+        disabled=[col for col in display_entries.columns if col != "Delete"],
+        key="raw_material_entries",
+    )
+
+    if st.button("Delete selected", key="raw_material_delete"):
+        selected = edited.loc[edited["Delete"] == True, "RM_ID"].dropna().astype(str).tolist()
+        if not selected:
+            st.warning("Select at least one entry to delete.")
+        else:
+            for rm_id in selected:
+                database.delete_row("Raw_Material_Log", rm_id)
+            st.success("Selected entries deleted.")
+            st.rerun()
