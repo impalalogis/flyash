@@ -30,6 +30,10 @@ def main() -> None:
 
     _init_connection()
 
+    if st.sidebar.button("Refresh data"):
+        database.clear_read_cache()
+        st.sidebar.success("Cache cleared")
+
     pages = {
         "Dashboard": dashboard.render,
         "Raw Material Entry": entry_raw_material.render,

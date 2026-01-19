@@ -20,6 +20,8 @@ ID_COLUMNS = {
     "Payments": "Payment_ID",
 }
 
+READ_CACHE_TTL = 120
+
 
 def _extract_spreadsheet_id(value: str) -> str:
     if "docs.google.com" in value:
@@ -70,7 +72,8 @@ def _get_header(worksheet: gspread.Worksheet) -> list[str]:
     return header
 
 
-def read_table(table_name: str) -> pd.DataFrame:
+@st.cache_data(ttl=READ_CACHE_TTL, show_spinner=False)
+def _read_table_cached(table_name: str, spreadsheet_id: str) -> pd.DataFrame:
     worksheet = _get_worksheet(table_name)
     records = worksheet.get_all_records()
     if not records:
@@ -79,11 +82,21 @@ def read_table(table_name: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def read_table(table_name: str) -> pd.DataFrame:
+    spreadsheet_id = _get_spreadsheet_id()
+    return _read_table_cached(table_name, spreadsheet_id).copy()
+
+
+def clear_read_cache() -> None:
+    _read_table_cached.clear()
+
+
 def insert_row(table_name: str, data: Dict[str, Any]) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
     row = [data.get(column, "") for column in header]
     worksheet.append_row(row, value_input_option="USER_ENTERED")
+    clear_read_cache()
 
 
 def _find_row_cell(
@@ -121,6 +134,7 @@ def update_row(table_name: str, row_id: str, data: Dict[str, Any]) -> None:
         [row_values],
         value_input_option="USER_ENTERED",
     )
+    clear_read_cache()
 
 
 def delete_row(table_name: str, row_id: str) -> None:
@@ -128,6 +142,7 @@ def delete_row(table_name: str, row_id: str) -> None:
     header = _get_header(worksheet)
     cell = _find_row_cell(worksheet, row_id, header, table_name)
     worksheet.delete_rows(cell.row)
+    clear_read_cache()
 
 
 def replace_table(table_name: str, data_frame: pd.DataFrame) -> None:
@@ -138,6 +153,7 @@ def replace_table(table_name: str, data_frame: pd.DataFrame) -> None:
     worksheet.clear()
     if rows:
         worksheet.update("A1", rows, value_input_option="USER_ENTERED")
+    clear_read_cache()
 
 
 def generate_id(prefix: str) -> str:
