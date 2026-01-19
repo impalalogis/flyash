@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import re
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import gspread
 import pandas as pd
