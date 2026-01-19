@@ -88,8 +88,15 @@ def _sync_production_log(
         }
         if not str(row.get("Labour_Payment_Date", "")).strip():
             update_data["Labour_Payment_Date"] = date_str
-        database.update_row("Production_Log", prod_id, update_data)
+        database.update_row(
+            "Production_Log",
+            prod_id,
+            update_data,
+            recompute_stock=False,
+        )
         updated_rows += 1
+    if updated_rows:
+        database.update_stock_log()
     return False, updated_rows
 
 

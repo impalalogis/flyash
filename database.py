@@ -10,6 +10,8 @@ import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
+import utils
+
 ID_COLUMNS = {
     "Suppliers": "Supplier_ID",
     "Customers": "Customer_ID",
@@ -22,6 +24,10 @@ ID_COLUMNS = {
 }
 
 READ_CACHE_TTL = 120
+
+
+def _should_recompute_stock(table_name: str) -> bool:
+    return table_name in {"Raw_Material_Log", "Production_Log"}
 
 
 def _extract_spreadsheet_id(value: str) -> str:
@@ -92,12 +98,22 @@ def clear_read_cache() -> None:
     _read_table_cached.clear()
 
 
-def insert_row(table_name: str, data: Dict[str, Any]) -> None:
+def update_stock_log() -> None:
+    clear_read_cache()
+    raw_df = read_table("Raw_Material_Log")
+    production_df = read_table("Production_Log")
+    stock_df = utils.compute_stock_log(raw_df, production_df)
+    replace_table("Stock_Log", stock_df, recompute_stock=False)
+
+
+def insert_row(table_name: str, data: Dict[str, Any], *, recompute_stock: bool = True) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
     row = [data.get(column, "") for column in header]
     worksheet.append_row(row, value_input_option="USER_ENTERED")
     clear_read_cache()
+    if recompute_stock and _should_recompute_stock(table_name):
+        update_stock_log()
 
 
 def _find_row_cell(
@@ -116,7 +132,13 @@ def _find_row_cell(
         raise ValueError(f"Row ID {row_id} not found in {table_name}") from exc
 
 
-def update_row(table_name: str, row_id: str, data: Dict[str, Any]) -> None:
+def update_row(
+    table_name: str,
+    row_id: str,
+    data: Dict[str, Any],
+    *,
+    recompute_stock: bool = True,
+) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
     cell = _find_row_cell(worksheet, row_id, header, table_name)
@@ -136,17 +158,26 @@ def update_row(table_name: str, row_id: str, data: Dict[str, Any]) -> None:
         value_input_option="USER_ENTERED",
     )
     clear_read_cache()
+    if recompute_stock and _should_recompute_stock(table_name):
+        update_stock_log()
 
 
-def delete_row(table_name: str, row_id: str) -> None:
+def delete_row(table_name: str, row_id: str, *, recompute_stock: bool = True) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
     cell = _find_row_cell(worksheet, row_id, header, table_name)
     worksheet.delete_rows(cell.row)
     clear_read_cache()
+    if recompute_stock and _should_recompute_stock(table_name):
+        update_stock_log()
 
 
-def replace_table(table_name: str, data_frame: pd.DataFrame) -> None:
+def replace_table(
+    table_name: str,
+    data_frame: pd.DataFrame,
+    *,
+    recompute_stock: bool = True,
+) -> None:
     worksheet = _get_worksheet(table_name)
     data_frame = data_frame.copy()
     data_frame = data_frame.where(pd.notnull(data_frame), "")
@@ -155,6 +186,8 @@ def replace_table(table_name: str, data_frame: pd.DataFrame) -> None:
     if rows:
         worksheet.update("A1", rows, value_input_option="USER_ENTERED")
     clear_read_cache()
+    if recompute_stock and _should_recompute_stock(table_name):
+        update_stock_log()
 
 
 def generate_id(prefix: str) -> str:

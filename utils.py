@@ -82,3 +82,96 @@ def ensure_ids(data_frame: pd.DataFrame, id_column: str, prefix: str, generator)
     for idx in data_frame[missing_mask].index:
         data_frame.at[idx, id_column] = generator(prefix)
     return data_frame
+
+
+def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.DataFrame:
+    columns = ["Date", "Month", "Material", "Opening", "Inward", "Consumed", "Closing"]
+    if raw_df.empty and production_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    raw_df = ensure_columns(raw_df, ["Date", "Material", "Qty"])
+    production_df = ensure_columns(
+        production_df,
+        ["Date", "Cement_Consumption", "FlyAsh_Consumption"],
+    )
+
+    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce").dt.date
+    production_df["Date"] = pd.to_datetime(production_df["Date"], errors="coerce").dt.date
+    raw_df = raw_df.dropna(subset=["Date"])
+    production_df = production_df.dropna(subset=["Date"])
+
+    raw_df["Material"] = raw_df["Material"].astype(str).str.strip()
+    raw_df["Qty"] = pd.to_numeric(raw_df["Qty"], errors="coerce").fillna(0.0)
+
+    inbound = (
+        raw_df.groupby(["Date", "Material"], dropna=False)["Qty"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Qty": "Inward"})
+    )
+
+    consumption_rows = []
+    consumption_map = {
+        "Cement": "Cement_Consumption",
+        "Fly Ash": "FlyAsh_Consumption",
+    }
+    for material, column in consumption_map.items():
+        if column not in production_df.columns:
+            continue
+        temp = production_df[["Date", column]].copy()
+        temp[column] = pd.to_numeric(temp[column], errors="coerce").fillna(0.0)
+        temp = temp.rename(columns={column: "Consumed"})
+        temp["Material"] = material
+        consumption_rows.append(temp)
+
+    if consumption_rows:
+        consumption_df = pd.concat(consumption_rows, ignore_index=True)
+        consumption = (
+            consumption_df.groupby(["Date", "Material"], dropna=False)["Consumed"]
+            .sum()
+            .reset_index()
+        )
+    else:
+        consumption = pd.DataFrame(columns=["Date", "Material", "Consumed"])
+
+    dates = sorted(
+        set(inbound["Date"].dropna().tolist())
+        | set(consumption["Date"].dropna().tolist())
+    )
+    materials = sorted(
+        set(inbound["Material"].dropna().astype(str).tolist())
+        | set(consumption["Material"].dropna().astype(str).tolist())
+    )
+    if not dates or not materials:
+        return pd.DataFrame(columns=columns)
+
+    inbound_map = {
+        (row["Date"], str(row["Material"]).strip()): float(row["Inward"])
+        for _, row in inbound.iterrows()
+    }
+    consumption_map = {
+        (row["Date"], str(row["Material"]).strip()): float(row["Consumed"])
+        for _, row in consumption.iterrows()
+    }
+
+    rows = []
+    for material in materials:
+        opening = 0.0
+        for day in dates:
+            inward = inbound_map.get((day, material), 0.0)
+            consumed = consumption_map.get((day, material), 0.0)
+            closing = opening + inward - consumed
+            rows.append(
+                {
+                    "Date": day.isoformat(),
+                    "Month": to_month_string(day),
+                    "Material": material,
+                    "Opening": round(opening, 2),
+                    "Inward": round(inward, 2),
+                    "Consumed": round(consumed, 2),
+                    "Closing": round(closing, 2),
+                }
+            )
+            opening = closing
+
+    return pd.DataFrame(rows, columns=columns)
