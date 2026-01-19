@@ -17,14 +17,80 @@ ATTENDANCE_COLUMNS = [
     "Status",
 ]
 
+PRODUCTION_COLUMNS = [
+    "Prod_ID",
+    "Date",
+    "Month",
+    "No_of_Bricks",
+    "Cement_Consumption",
+    "FlyAsh_Consumption",
+    "No_of_Labour",
+    "Labour_Expense",
+    "Labour_Payment_Date",
+    "Actual_Payment_Amount",
+]
+
 
 def _active_labour(labour_df: pd.DataFrame) -> pd.DataFrame:
     if labour_df.empty:
         return labour_df
     if "Active_Status" not in labour_df.columns:
         return labour_df
-    active = labour_df["Active_Status"].astype(str).str.strip().str.lower() != "inactive"
+    status = labour_df["Active_Status"].astype(str).str.strip().str.lower()
+    active = status == "active"
     return labour_df[active]
+
+
+def _sync_production_log(
+    attendance_date: date,
+    present_count: int,
+    labour_df: pd.DataFrame,
+) -> tuple[bool, int]:
+    if present_count <= 0:
+        return False, 0
+
+    production_df = database.read_table("Production_Log")
+    if production_df.empty:
+        production_df = pd.DataFrame(columns=PRODUCTION_COLUMNS)
+    production_df = utils.ensure_columns(production_df, PRODUCTION_COLUMNS)
+    prod_dates = pd.to_datetime(production_df["Date"], errors="coerce").dt.date
+    day_rows = production_df[prod_dates == attendance_date]
+
+    avg_wage = utils.average_daily_wage(labour_df)
+    labour_expense = utils.calculate_labour_expense(present_count, avg_wage)
+    date_str = attendance_date.isoformat()
+
+    if day_rows.empty:
+        data = {
+            "Prod_ID": database.generate_id("PROD"),
+            "Date": date_str,
+            "Month": utils.to_month_string(attendance_date),
+            "No_of_Bricks": 0,
+            "Cement_Consumption": 0,
+            "FlyAsh_Consumption": 0,
+            "No_of_Labour": present_count,
+            "Labour_Expense": labour_expense,
+            "Labour_Payment_Date": date_str,
+            "Actual_Payment_Amount": 0,
+        }
+        data = {key: data.get(key, "") for key in PRODUCTION_COLUMNS}
+        database.insert_row("Production_Log", data)
+        return True, 1
+
+    updated_rows = 0
+    for _, row in day_rows.iterrows():
+        prod_id = str(row.get("Prod_ID", "")).strip()
+        if not prod_id:
+            continue
+        update_data = {
+            "No_of_Labour": present_count,
+            "Labour_Expense": labour_expense,
+        }
+        if not str(row.get("Labour_Payment_Date", "")).strip():
+            update_data["Labour_Payment_Date"] = date_str
+        database.update_row("Production_Log", prod_id, update_data)
+        updated_rows += 1
+    return False, updated_rows
 
 
 def render() -> None:
@@ -111,7 +177,17 @@ def render() -> None:
         updated = pd.concat([updated, pd.DataFrame(new_rows)], ignore_index=True)
         updated = utils.ensure_columns(updated, ATTENDANCE_COLUMNS)
         database.replace_table("Labour_Attendance", updated)
-        st.success("Attendance saved.")
+        created, updated_count = _sync_production_log(
+            attendance_date=attendance_date,
+            present_count=present_count,
+            labour_df=active_labour,
+        )
+        if created:
+            st.success("Attendance saved and production log created.")
+        elif updated_count:
+            st.success("Attendance saved and production log updated.")
+        else:
+            st.success("Attendance saved.")
         st.rerun()
 
     st.subheader("Attendance Log")
