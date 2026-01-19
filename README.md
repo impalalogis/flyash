@@ -133,3 +133,37 @@ from the JSON key (the `client_email` field).
    - `pip install -r requirements.txt`
 2. Start Streamlit:
    - `streamlit run app.py`
+
+## Optional: auto-generate IDs for manual sheet entry
+If you add rows directly in Google Sheets, you can use Apps Script to
+auto-fill ID columns. Open Extensions -> Apps Script, paste the script below,
+and save it.
+
+```javascript
+const ID_CONFIG = {
+  Suppliers: { column: 1, prefix: "SUP" },
+  Customers: { column: 1, prefix: "CUS" },
+  Labour: { column: 1, prefix: "LAB" },
+  Raw_Material_Log: { column: 1, prefix: "RM" },
+  Production_Log: { column: 1, prefix: "PROD" },
+  Sales_Log: { column: 1, prefix: "SAL" },
+  Payments: { column: 1, prefix: "PAY" },
+};
+
+function onEdit(e) {
+  const sheet = e.range.getSheet();
+  const config = ID_CONFIG[sheet.getName()];
+  if (!config) return;
+  const row = e.range.getRow();
+  if (row === 1) return;
+  const idCell = sheet.getRange(row, config.column);
+  if (idCell.getValue()) return;
+  idCell.setValue(generateId(config.prefix));
+}
+
+function generateId(prefix) {
+  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
+  const token = Utilities.getUuid().replace(/-/g, "").substring(0, 6).toUpperCase();
+  return `${prefix}-${date}-${token}`;
+}
+```

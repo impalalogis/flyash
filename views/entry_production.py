@@ -55,21 +55,31 @@ def render() -> None:
         submitted = st.form_submit_button("Save Entry")
 
     if submitted:
-        data = {
-            "Prod_ID": database.generate_id("PROD"),
-            "Date": prod_date.isoformat(),
-            "Month": utils.to_month_string(prod_date),
-            "No_of_Bricks": no_of_bricks,
-            "Cement_Consumption": cement_consumption,
-            "FlyAsh_Consumption": flyash_consumption,
-            "No_of_Labour": no_of_labour,
-            "Labour_Expense": labour_expense,
-            "Labour_Payment_Date": labour_payment_date.isoformat(),
-            "Actual_Payment_Amount": actual_payment_amount,
-        }
-        data = {key: data.get(key, "") for key in PRODUCTION_COLUMNS}
-        database.insert_row("Production_Log", data)
-        st.success("Production entry saved.")
+        errors = []
+        if no_of_bricks <= 0:
+            errors.append("No of Bricks must be greater than 0.")
+        if no_of_labour <= 0:
+            errors.append("No of Labour must be greater than 0.")
+
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            data = {
+                "Prod_ID": database.generate_id("PROD"),
+                "Date": prod_date.isoformat(),
+                "Month": utils.to_month_string(prod_date),
+                "No_of_Bricks": no_of_bricks,
+                "Cement_Consumption": cement_consumption,
+                "FlyAsh_Consumption": flyash_consumption,
+                "No_of_Labour": no_of_labour,
+                "Labour_Expense": labour_expense,
+                "Labour_Payment_Date": labour_payment_date.isoformat(),
+                "Actual_Payment_Amount": actual_payment_amount,
+            }
+            data = {key: data.get(key, "") for key in PRODUCTION_COLUMNS}
+            database.insert_row("Production_Log", data)
+            st.success("Production entry saved.")
 
     st.subheader("Production Entries")
     entries = database.read_table("Production_Log")

@@ -115,29 +115,41 @@ def render() -> None:
         submitted = st.form_submit_button("Save Entry")
 
     if submitted:
-        data = {
-            "RM_ID": database.generate_id("RM"),
-            "Date": material_date.isoformat(),
-            "Month": utils.to_month_string(material_date),
-            "Supplier_ID": supplier_id,
-            "Material": material,
-            "Qty": qty,
-            "Rate": rate,
-            "GST": gst,
-            "Vehicle_No": vehicle_no,
-            "Trip_Days": trip_days,
-            "Route_Expenses": route_expenses,
-            "Diesel": diesel,
-            "Driver_Salary": driver_salary,
-            "Vehicle_Charge": vehicle_charge,
-            "Freight": freight,
-            "Amount_Paid": amount_paid,
-            "Material_Rate": material_rate,
-            "Total_Cost": total_cost,
-        }
-        data = {key: data.get(key, "") for key in RAW_MATERIAL_COLUMNS}
-        database.insert_row("Raw_Material_Log", data)
-        st.success("Raw material entry saved.")
+        errors = []
+        if qty <= 0:
+            errors.append("Quantity must be greater than 0.")
+        if rate <= 0:
+            errors.append("Rate must be greater than 0.")
+        if not material:
+            errors.append("Material is required.")
+
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            data = {
+                "RM_ID": database.generate_id("RM"),
+                "Date": material_date.isoformat(),
+                "Month": utils.to_month_string(material_date),
+                "Supplier_ID": supplier_id,
+                "Material": material,
+                "Qty": qty,
+                "Rate": rate,
+                "GST": gst,
+                "Vehicle_No": vehicle_no,
+                "Trip_Days": trip_days,
+                "Route_Expenses": route_expenses,
+                "Diesel": diesel,
+                "Driver_Salary": driver_salary,
+                "Vehicle_Charge": vehicle_charge,
+                "Freight": freight,
+                "Amount_Paid": amount_paid,
+                "Material_Rate": material_rate,
+                "Total_Cost": total_cost,
+            }
+            data = {key: data.get(key, "") for key in RAW_MATERIAL_COLUMNS}
+            database.insert_row("Raw_Material_Log", data)
+            st.success("Raw material entry saved.")
 
     st.subheader("Raw Material Entries")
     entries = database.read_table("Raw_Material_Log")

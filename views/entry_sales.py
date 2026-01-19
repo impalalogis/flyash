@@ -91,37 +91,53 @@ def render() -> None:
         submitted = st.form_submit_button("Save Entry")
 
     if submitted:
-        data = {
-            "Sales_ID": database.generate_id("SAL"),
-            "Date": sale_date.isoformat(),
-            "Month": utils.to_month_string(sale_date),
-            "Customer_ID": customer_id,
-            "Destination": destination,
-            "No_of_Bricks": no_of_bricks,
-            "Rate": rate,
-            "Amount": amount,
-            "Freight": freight,
-            "Transport_Party": transport_party,
-            "Total_Amount": total_amount,
-            "Freight_Paid": freight_paid,
-            "Freight_Paid_By": freight_paid_by,
-            "Amount_Received": amount_received,
-            "Payment_Mode": payment_mode,
-            "Payment_Date": payment_date.isoformat(),
-            "Due": due,
-            "Invoice_No": invoice_no,
-        }
-        data = {key: data.get(key, "") for key in SALES_COLUMNS}
-        database.insert_row("Sales_Log", data)
+        errors = []
+        if no_of_bricks <= 0:
+            errors.append("No of Bricks must be greater than 0.")
+        if rate <= 0:
+            errors.append("Rate must be greater than 0.")
+        if amount_received > total_amount:
+            errors.append("Amount Received cannot exceed Total Amount.")
+        if not invoice_no:
+            errors.append("Invoice No is required.")
 
-        outstanding = 0.0
-        customer_row = customers.loc[customers["Customer_ID"] == customer_id]
-        if not customer_row.empty:
-            outstanding = utils.safe_float(customer_row.iloc[0].get("Outstanding_Balance", 0))
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            data = {
+                "Sales_ID": database.generate_id("SAL"),
+                "Date": sale_date.isoformat(),
+                "Month": utils.to_month_string(sale_date),
+                "Customer_ID": customer_id,
+                "Destination": destination,
+                "No_of_Bricks": no_of_bricks,
+                "Rate": rate,
+                "Amount": amount,
+                "Freight": freight,
+                "Transport_Party": transport_party,
+                "Total_Amount": total_amount,
+                "Freight_Paid": freight_paid,
+                "Freight_Paid_By": freight_paid_by,
+                "Amount_Received": amount_received,
+                "Payment_Mode": payment_mode,
+                "Payment_Date": payment_date.isoformat(),
+                "Due": due,
+                "Invoice_No": invoice_no,
+            }
+            data = {key: data.get(key, "") for key in SALES_COLUMNS}
+            database.insert_row("Sales_Log", data)
 
-        database.update_row(
-            "Customers",
-            customer_id,
-            {"Outstanding_Balance": outstanding + due},
-        )
-        st.success("Sales entry saved and outstanding updated.")
+            outstanding = 0.0
+            customer_row = customers.loc[customers["Customer_ID"] == customer_id]
+            if not customer_row.empty:
+                outstanding = utils.safe_float(
+                    customer_row.iloc[0].get("Outstanding_Balance", 0)
+                )
+
+            database.update_row(
+                "Customers",
+                customer_id,
+                {"Outstanding_Balance": outstanding + due},
+            )
+            st.success("Sales entry saved and outstanding updated.")
