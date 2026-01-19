@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+from datetime import date
+
+import pandas as pd
+import streamlit as st
+
+import database
+import utils
+
+
+MATERIAL_TYPES = [
+    "Fly Ash",
+    "Cement",
+    "Sand",
+    "Stone Dust",
+    "Diesel",
+    "Transport",
+    "Maintenance",
+]
+
+
+RAW_MATERIAL_COLUMNS = [
+    "RM_ID",
+    "Date",
+    "Month",
+    "Supplier_ID",
+    "Material",
+    "Qty",
+    "Rate",
+    "GST",
+    "Vehicle_No",
+    "Trip_Days",
+    "Route_Expenses",
+    "Diesel",
+    "Driver_Salary",
+    "Vehicle_Charge",
+    "Freight",
+    "Amount_Paid",
+    "Material_Rate",
+    "Total_Cost",
+]
+
+
+def _supplier_options(suppliers: pd.DataFrame) -> dict[str, str]:
+    options: dict[str, str] = {}
+    for _, row in suppliers.iterrows():
+        supplier_id = str(row.get("Supplier_ID", "")).strip()
+        name = str(row.get("Name", "")).strip()
+        if supplier_id:
+            label = f"{supplier_id} - {name}" if name else supplier_id
+            options[label] = supplier_id
+    return options
+
+
+def render() -> None:
+    st.header("Raw Material Entry")
+
+    suppliers = database.read_table("Suppliers")
+    if suppliers.empty:
+        st.info("Add suppliers in Master Data before logging materials.")
+        return
+
+    supplier_labels = _supplier_options(suppliers)
+    if not supplier_labels:
+        st.info("Supplier IDs are missing. Update Master Data.")
+        return
+
+    with st.form("raw_material_form", clear_on_submit=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            material_date = st.date_input("Date", value=date.today())
+            supplier_label = st.selectbox("Supplier", list(supplier_labels.keys()))
+            supplier_id = supplier_labels[supplier_label]
+            supplier_row = suppliers.loc[suppliers["Supplier_ID"] == supplier_id]
+            supplier_material = ""
+            if not supplier_row.empty:
+                supplier_material = str(supplier_row.iloc[0].get("Material_Type", "")).strip()
+            material_index = (
+                MATERIAL_TYPES.index(supplier_material)
+                if supplier_material in MATERIAL_TYPES
+                else 0
+            )
+            material = st.selectbox("Material", MATERIAL_TYPES, index=material_index)
+            qty = st.number_input("Quantity", min_value=0.0, step=1.0)
+            rate = st.number_input("Rate", min_value=0.0, step=1.0)
+        with col2:
+            gst = st.number_input("GST", min_value=0.0, step=1.0)
+            vehicle_no = st.text_input("Vehicle No")
+            trip_days = st.number_input("Trip Days", min_value=0, step=1)
+            route_expenses = st.number_input("Route Expenses", min_value=0.0, step=1.0)
+            diesel = st.number_input("Diesel", min_value=0.0, step=1.0)
+        with col3:
+            driver_salary = st.number_input("Driver Salary", min_value=0.0, step=1.0)
+            vehicle_charge = st.number_input("Vehicle Charge", min_value=0.0, step=1.0)
+            freight = st.number_input("Freight", min_value=0.0, step=1.0)
+            amount_paid = st.number_input("Amount Paid", min_value=0.0, step=1.0)
+
+        material_rate = qty * rate
+        total_cost = utils.calculate_total_cost(
+            qty=qty,
+            rate=rate,
+            gst=gst,
+            route_expenses=route_expenses,
+            diesel=diesel,
+            driver_salary=driver_salary,
+            vehicle_charge=vehicle_charge,
+            freight=freight,
+        )
+
+        st.markdown("**Calculated Costs**")
+        st.write(f"Material Rate: {material_rate:,.2f}")
+        st.write(f"Total Cost: {total_cost:,.2f}")
+
+        submitted = st.form_submit_button("Save Entry")
+
+    if submitted:
+        data = {
+            "RM_ID": database.generate_id("RM"),
+            "Date": material_date.isoformat(),
+            "Month": utils.to_month_string(material_date),
+            "Supplier_ID": supplier_id,
+            "Material": material,
+            "Qty": qty,
+            "Rate": rate,
+            "GST": gst,
+            "Vehicle_No": vehicle_no,
+            "Trip_Days": trip_days,
+            "Route_Expenses": route_expenses,
+            "Diesel": diesel,
+            "Driver_Salary": driver_salary,
+            "Vehicle_Charge": vehicle_charge,
+            "Freight": freight,
+            "Amount_Paid": amount_paid,
+            "Material_Rate": material_rate,
+            "Total_Cost": total_cost,
+        }
+        data = {key: data.get(key, "") for key in RAW_MATERIAL_COLUMNS}
+        database.insert_row("Raw_Material_Log", data)
+        st.success("Raw material entry saved.")
