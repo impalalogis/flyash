@@ -29,6 +29,7 @@ LABOUR_COLUMNS = [
     "Labour_ID",
     "Name",
     "Category",
+    "Active_Status",
     "Daily_Wage",
 ]
 
@@ -41,6 +42,7 @@ def _edit_table(
     id_column: str,
     required_columns: list[str],
     numeric_columns: list[str],
+    column_config: dict | None = None,
 ) -> None:
     st.subheader(title)
     data_frame = database.read_table(table_name)
@@ -53,6 +55,7 @@ def _edit_table(
         num_rows="dynamic",
         use_container_width=True,
         disabled=[id_column],
+        column_config=column_config,
         key=f"{table_name}_editor",
     )
 
@@ -117,6 +120,13 @@ def render() -> None:
             LABOUR_COLUMNS,
             "LAB",
             "Labour_ID",
-            required_columns=["Name", "Category"],
+            required_columns=["Name", "Category", "Active_Status"],
             numeric_columns=["Daily_Wage"],
+            column_config={
+                "Active_Status": st.column_config.SelectboxColumn(
+                    "Active Status",
+                    options=["Active", "Inactive"],
+                    required=True,
+                ),
+            },
         )

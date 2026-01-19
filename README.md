@@ -11,6 +11,7 @@ Create a Google Sheet and add the following tabs (case-sensitive):
 - `Suppliers`
 - `Customers`
 - `Labour`
+- `Labour_Attendance`
 - `Raw_Material_Log`
 - `Production_Log`
 - `Sales_Log`
@@ -40,7 +41,15 @@ Add the following header row (row 1) for each tab:
 - Labour_ID
 - Name
 - Category
+- Active_Status
 - Daily_Wage
+
+**Labour_Attendance**
+- Attendance_ID
+- Date
+- Labour_ID
+- Name
+- Status
 
 **Raw_Material_Log**
 - RM_ID
@@ -144,6 +153,7 @@ const ID_CONFIG = {
   Suppliers: { column: 1, prefix: "SUP" },
   Customers: { column: 1, prefix: "CUS" },
   Labour: { column: 1, prefix: "LAB" },
+  Labour_Attendance: { column: 1, prefix: "ATT" },
   Raw_Material_Log: { column: 1, prefix: "RM" },
   Production_Log: { column: 1, prefix: "PROD" },
   Sales_Log: { column: 1, prefix: "SAL" },
