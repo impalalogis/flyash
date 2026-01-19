@@ -14,6 +14,7 @@ ID_COLUMNS = {
     "Suppliers": "Supplier_ID",
     "Customers": "Customer_ID",
     "Labour": "Labour_ID",
+    "Labour_Attendance": "Attendance_ID",
     "Raw_Material_Log": "RM_ID",
     "Production_Log": "Prod_ID",
     "Sales_Log": "Sales_ID",

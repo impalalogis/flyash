@@ -29,6 +29,7 @@ LABOUR_COLUMNS = [
     "Labour_ID",
     "Name",
     "Category",
+    "Active_Status",
     "Daily_Wage",
 ]
 
@@ -39,6 +40,9 @@ def _edit_table(
     columns: list[str],
     id_prefix: str,
     id_column: str,
+    required_columns: list[str],
+    numeric_columns: list[str],
+    column_config: dict | None = None,
 ) -> None:
     st.subheader(title)
     data_frame = database.read_table(table_name)
@@ -50,12 +54,37 @@ def _edit_table(
         data_frame,
         num_rows="dynamic",
         use_container_width=True,
+        disabled=[id_column],
+        column_config=column_config,
         key=f"{table_name}_editor",
     )
 
     if st.button(f"Save {title}", key=f"{table_name}_save"):
-        updated = utils.ensure_ids(edited, id_column, id_prefix, database.generate_id)
+        updated = edited.copy()
+        non_id_columns = [column for column in columns if column != id_column]
+        updated = updated.replace("", pd.NA)
+        updated = updated.dropna(how="all", subset=non_id_columns)
+        updated = utils.ensure_ids(updated, id_column, id_prefix, database.generate_id)
+        updated = updated.fillna("")
         updated = utils.ensure_columns(updated, columns)
+
+        errors = []
+        for column in required_columns:
+            missing = updated[column].astype(str).str.strip() == ""
+            if missing.any():
+                errors.append(f"{column} is required for {missing.sum()} row(s).")
+
+        for column in numeric_columns:
+            values = pd.to_numeric(updated[column], errors="coerce")
+            invalid = values.isna()
+            if invalid.any():
+                errors.append(f"{column} must be a number for {invalid.sum()} row(s).")
+
+        if errors:
+            for error in errors:
+                st.error(error)
+            return
+
         database.replace_table(table_name, updated)
         st.success(f"{title} updated.")
 
@@ -65,8 +94,39 @@ def render() -> None:
 
     supplier_tab, customer_tab, labour_tab = st.tabs(["Suppliers", "Customers", "Labour"])
     with supplier_tab:
-        _edit_table("Suppliers", "Suppliers", SUPPLIERS_COLUMNS, "SUP", "Supplier_ID")
+        _edit_table(
+            "Suppliers",
+            "Suppliers",
+            SUPPLIERS_COLUMNS,
+            "SUP",
+            "Supplier_ID",
+            required_columns=["Name", "Material_Type"],
+            numeric_columns=["Unit_Rate"],
+        )
     with customer_tab:
-        _edit_table("Customers", "Customers", CUSTOMERS_COLUMNS, "CUS", "Customer_ID")
+        _edit_table(
+            "Customers",
+            "Customers",
+            CUSTOMERS_COLUMNS,
+            "CUS",
+            "Customer_ID",
+            required_columns=["Name"],
+            numeric_columns=["Outstanding_Balance", "Credit_Limit"],
+        )
     with labour_tab:
-        _edit_table("Labour", "Labour", LABOUR_COLUMNS, "LAB", "Labour_ID")
+        _edit_table(
+            "Labour",
+            "Labour",
+            LABOUR_COLUMNS,
+            "LAB",
+            "Labour_ID",
+            required_columns=["Name", "Category", "Active_Status"],
+            numeric_columns=["Daily_Wage"],
+            column_config={
+                "Active_Status": st.column_config.SelectboxColumn(
+                    "Active Status",
+                    options=["Active", "Inactive"],
+                    required=True,
+                ),
+            },
+        )

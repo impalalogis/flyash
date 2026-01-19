@@ -63,30 +63,42 @@ def render() -> None:
         submitted = st.form_submit_button("Save Payment")
 
     if submitted:
-        data = {
-            "Payment_ID": database.generate_id("PAY"),
-            "Customer_ID": customer_id,
-            "Invoice_No": invoice_no,
-            "Amount_Paid": amount_paid,
-            "Date": payment_date.isoformat(),
-            "Mode": mode,
-            "Payment_Status": payment_status,
-        }
-        data = {key: data.get(key, "") for key in PAYMENT_COLUMNS}
-        database.insert_row("Payments", data)
+        errors = []
+        if amount_paid <= 0:
+            errors.append("Amount Paid must be greater than 0.")
+        if not invoice_no:
+            errors.append("Invoice No is required.")
 
-        outstanding = 0.0
-        customer_row = customers.loc[customers["Customer_ID"] == customer_id]
-        if not customer_row.empty:
-            outstanding = utils.safe_float(customer_row.iloc[0].get("Outstanding_Balance", 0))
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            data = {
+                "Payment_ID": database.generate_id("PAY"),
+                "Customer_ID": customer_id,
+                "Invoice_No": invoice_no,
+                "Amount_Paid": amount_paid,
+                "Date": payment_date.isoformat(),
+                "Mode": mode,
+                "Payment_Status": payment_status,
+            }
+            data = {key: data.get(key, "") for key in PAYMENT_COLUMNS}
+            database.insert_row("Payments", data)
 
-        database.update_row(
-            "Customers",
-            customer_id,
-            {"Outstanding_Balance": outstanding - amount_paid},
-        )
+            outstanding = 0.0
+            customer_row = customers.loc[customers["Customer_ID"] == customer_id]
+            if not customer_row.empty:
+                outstanding = utils.safe_float(
+                    customer_row.iloc[0].get("Outstanding_Balance", 0)
+                )
 
-        st.success("Payment saved and outstanding updated.")
+            database.update_row(
+                "Customers",
+                customer_id,
+                {"Outstanding_Balance": outstanding - amount_paid},
+            )
+
+            st.success("Payment saved and outstanding updated.")
 
     st.subheader("Payment History")
     payments_df = database.read_table("Payments")
