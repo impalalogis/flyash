@@ -21,7 +21,10 @@ def _parse_dates(data_frame: pd.DataFrame, column: str) -> pd.DataFrame:
 def _filter_by_date(data_frame: pd.DataFrame, column: str, start: date, end: date) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
-    return data_frame[(data_frame[column] >= start) & (data_frame[column] <= end)]
+    series = pd.to_datetime(data_frame[column], errors="coerce")
+    start_ts = pd.to_datetime(start)
+    end_ts = pd.to_datetime(end)
+    return data_frame[(series >= start_ts) & (series <= end_ts)]
 
 
 def render() -> None:
@@ -30,6 +33,7 @@ def render() -> None:
     raw_materials = _parse_dates(database.read_table("Raw_Material_Log"), "Date")
     production = _parse_dates(database.read_table("Production_Log"), "Date")
     sales = _parse_dates(database.read_table("Sales_Log"), "Date")
+    stock_log = _parse_dates(database.read_table("Stock_Log"), "Date")
     customers = database.read_table("Customers")
 
     all_dates = []
@@ -242,3 +246,20 @@ def render() -> None:
         st.subheader("Customer Outstanding Balances")
         customer_view = customers[["Customer_ID", "Name", "Outstanding_Balance"]].copy()
         st.dataframe(customer_view, use_container_width=True)
+
+    st.subheader("Stock by Material")
+    if stock_log.empty:
+        st.info("No stock data available.")
+        return
+
+    stock_filtered = _filter_by_date(stock_log, "Date", start_date, end_date)
+    if material_filter:
+        stock_filtered = stock_filtered[stock_filtered["Material"].isin(material_filter)]
+
+    latest_stock = (
+        stock_filtered.sort_values("Date")
+        .groupby("Material", as_index=False)
+        .tail(1)
+        .sort_values("Material")
+    )
+    st.dataframe(latest_stock, use_container_width=True)
