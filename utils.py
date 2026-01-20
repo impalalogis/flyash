@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 import re
 from typing import Iterable
+import base64
+import binascii
 import io
 import textwrap
 
@@ -190,6 +192,18 @@ def style_invalid(data_frame: pd.DataFrame, mask: pd.DataFrame) -> pd.io.formats
         ]
 
     return data_frame.style.apply(_style_row, axis=1)
+
+
+def decode_base64_data(value: str | None) -> bytes | None:
+    if not value:
+        return None
+    data = str(value).strip()
+    if data.startswith("data:") and "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        return base64.b64decode(data)
+    except (ValueError, binascii.Error, TypeError):
+        return None
 
 
 def generate_invoice_pdf(

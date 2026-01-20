@@ -229,75 +229,147 @@ def render() -> None:
                     st.error("Customer record not found for this sale.")
                 else:
                     customer_row = customer_row.iloc[0]
+                    invoice_secrets = st.secrets.get("invoice", {})
+                    company_defaults = {
+                        "name": str(invoice_secrets.get("company_name", "")).strip()
+                        or "Fly-Ash Brick Unit",
+                        "address": str(invoice_secrets.get("company_address", "")).strip(),
+                        "contact": str(invoice_secrets.get("company_contact", "")).strip(),
+                        "gst": str(invoice_secrets.get("company_gst", "")).strip(),
+                    }
+                    branding_defaults = {
+                        "brand_color": str(invoice_secrets.get("brand_color", "#1F4E79")).strip()
+                        or "#1F4E79",
+                        "logo_bytes": utils.decode_base64_data(
+                            invoice_secrets.get("logo_base64")
+                        ),
+                        "signature_bytes": utils.decode_base64_data(
+                            invoice_secrets.get("signature_base64")
+                        ),
+                        "terms": str(invoice_secrets.get("terms", "")).strip(),
+                    }
+                    has_company_defaults = any(company_defaults.values())
+                    has_branding_defaults = any(
+                        [
+                            branding_defaults["logo_bytes"],
+                            branding_defaults["signature_bytes"],
+                            branding_defaults["terms"],
+                        ]
+                    )
+
                     with st.expander("Company details", expanded=False):
-                        company_name = st.text_input(
-                            "Company Name",
-                            value=st.session_state.get("company_name", "Fly-Ash Brick Unit"),
+                        override_company = st.checkbox(
+                            "Override company details for this invoice",
+                            value=not has_company_defaults,
+                            key="invoice_override_company",
                         )
-                        company_address = st.text_input(
-                            "Address",
-                            value=st.session_state.get("company_address", ""),
-                        )
-                        company_contact = st.text_input(
-                            "Contact",
-                            value=st.session_state.get("company_contact", ""),
-                        )
-                        company_gst = st.text_input(
-                            "GST",
-                            value=st.session_state.get("company_gst", ""),
-                        )
-                        st.session_state["company_name"] = company_name
-                        st.session_state["company_address"] = company_address
-                        st.session_state["company_contact"] = company_contact
-                        st.session_state["company_gst"] = company_gst
+                        if override_company:
+                            company_name = st.text_input(
+                                "Company Name",
+                                value=st.session_state.get(
+                                    "company_name", company_defaults["name"]
+                                ),
+                            )
+                            company_address = st.text_input(
+                                "Address",
+                                value=st.session_state.get(
+                                    "company_address", company_defaults["address"]
+                                ),
+                            )
+                            company_contact = st.text_input(
+                                "Contact",
+                                value=st.session_state.get(
+                                    "company_contact", company_defaults["contact"]
+                                ),
+                            )
+                            company_gst = st.text_input(
+                                "GST",
+                                value=st.session_state.get("company_gst", company_defaults["gst"]),
+                            )
+                            st.session_state["company_name"] = company_name
+                            st.session_state["company_address"] = company_address
+                            st.session_state["company_contact"] = company_contact
+                            st.session_state["company_gst"] = company_gst
+                        else:
+                            company_name = company_defaults["name"]
+                            company_address = company_defaults["address"]
+                            company_contact = company_defaults["contact"]
+                            company_gst = company_defaults["gst"]
+                            st.text_input("Company Name", value=company_name, disabled=True)
+                            st.text_input("Address", value=company_address, disabled=True)
+                            st.text_input("Contact", value=company_contact, disabled=True)
+                            st.text_input("GST", value=company_gst, disabled=True)
 
                     with st.expander("Branding", expanded=False):
-                        logo_file = st.file_uploader(
-                            "Logo (PNG/JPG)",
-                            type=["png", "jpg", "jpeg"],
-                            key="invoice_logo",
+                        logo_bytes = None
+                        signature_bytes = None
+                        override_branding = st.checkbox(
+                            "Override branding for this invoice",
+                            value=not has_branding_defaults,
+                            key="invoice_override_branding",
                         )
-                        signature_file = st.file_uploader(
-                            "Signature (PNG/JPG)",
-                            type=["png", "jpg", "jpeg"],
-                            key="invoice_signature",
-                        )
-                        brand_color = st.color_picker(
-                            "Brand color",
-                            value=st.session_state.get("invoice_brand_color", "#1F4E79"),
-                        )
-                        terms = st.text_area(
-                            "Terms and notes",
-                            value=st.session_state.get("invoice_terms", ""),
-                            height=80,
-                        )
-                        if logo_file:
-                            st.session_state["invoice_logo_bytes"] = logo_file.getvalue()
-                        if signature_file:
-                            st.session_state["invoice_signature_bytes"] = (
-                                signature_file.getvalue()
+                        if override_branding:
+                            logo_file = st.file_uploader(
+                                "Logo (PNG/JPG)",
+                                type=["png", "jpg", "jpeg"],
+                                key="invoice_logo",
                             )
-                        st.session_state["invoice_brand_color"] = brand_color
-                        st.session_state["invoice_terms"] = terms
+                            signature_file = st.file_uploader(
+                                "Signature (PNG/JPG)",
+                                type=["png", "jpg", "jpeg"],
+                                key="invoice_signature",
+                            )
+                            brand_color = st.color_picker(
+                                "Brand color",
+                                value=st.session_state.get(
+                                    "invoice_brand_color", branding_defaults["brand_color"]
+                                ),
+                            )
+                            terms = st.text_area(
+                                "Terms and notes",
+                                value=st.session_state.get(
+                                    "invoice_terms", branding_defaults["terms"]
+                                ),
+                                height=80,
+                            )
+                            if logo_file:
+                                st.session_state["invoice_logo_bytes"] = logo_file.getvalue()
+                            if signature_file:
+                                st.session_state["invoice_signature_bytes"] = (
+                                    signature_file.getvalue()
+                                )
+                            st.session_state["invoice_brand_color"] = brand_color
+                            st.session_state["invoice_terms"] = terms
+                            logo_bytes = st.session_state.get("invoice_logo_bytes")
+                            signature_bytes = st.session_state.get("invoice_signature_bytes")
+                        else:
+                            brand_color = branding_defaults["brand_color"]
+                            terms = branding_defaults["terms"]
+                            logo_bytes = branding_defaults["logo_bytes"]
+                            signature_bytes = branding_defaults["signature_bytes"]
+                            st.color_picker("Brand color", value=brand_color, disabled=True)
+                            st.text_area("Terms and notes", value=terms, height=80, disabled=True)
+                            st.write(
+                                {
+                                    "logo": "set" if logo_bytes else "not set",
+                                    "signature": "set" if signature_bytes else "not set",
+                                }
+                            )
 
                     pdf_bytes = utils.generate_invoice_pdf(
                         selected_row,
                         customer_row,
                         {
-                            "name": st.session_state.get("company_name", ""),
-                            "address": st.session_state.get("company_address", ""),
-                            "contact": st.session_state.get("company_contact", ""),
-                            "gst": st.session_state.get("company_gst", ""),
+                            "name": company_name,
+                            "address": company_address,
+                            "contact": company_contact,
+                            "gst": company_gst,
                         },
                         {
-                            "logo_bytes": st.session_state.get("invoice_logo_bytes"),
-                            "signature_bytes": st.session_state.get(
-                                "invoice_signature_bytes"
-                            ),
-                            "brand_color": st.session_state.get(
-                                "invoice_brand_color", "#1F4E79"
-                            ),
-                            "terms": st.session_state.get("invoice_terms", ""),
+                            "logo_bytes": logo_bytes,
+                            "signature_bytes": signature_bytes,
+                            "brand_color": brand_color,
+                            "terms": terms,
                         },
                     )
                     filename_base = re.sub(r"[^A-Za-z0-9_-]+", "_", label)
