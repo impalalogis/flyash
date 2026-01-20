@@ -251,6 +251,35 @@ def render() -> None:
                         st.session_state["company_contact"] = company_contact
                         st.session_state["company_gst"] = company_gst
 
+                    with st.expander("Branding", expanded=False):
+                        logo_file = st.file_uploader(
+                            "Logo (PNG/JPG)",
+                            type=["png", "jpg", "jpeg"],
+                            key="invoice_logo",
+                        )
+                        signature_file = st.file_uploader(
+                            "Signature (PNG/JPG)",
+                            type=["png", "jpg", "jpeg"],
+                            key="invoice_signature",
+                        )
+                        brand_color = st.color_picker(
+                            "Brand color",
+                            value=st.session_state.get("invoice_brand_color", "#1F4E79"),
+                        )
+                        terms = st.text_area(
+                            "Terms and notes",
+                            value=st.session_state.get("invoice_terms", ""),
+                            height=80,
+                        )
+                        if logo_file:
+                            st.session_state["invoice_logo_bytes"] = logo_file.getvalue()
+                        if signature_file:
+                            st.session_state["invoice_signature_bytes"] = (
+                                signature_file.getvalue()
+                            )
+                        st.session_state["invoice_brand_color"] = brand_color
+                        st.session_state["invoice_terms"] = terms
+
                     pdf_bytes = utils.generate_invoice_pdf(
                         selected_row,
                         customer_row,
@@ -259,6 +288,16 @@ def render() -> None:
                             "address": st.session_state.get("company_address", ""),
                             "contact": st.session_state.get("company_contact", ""),
                             "gst": st.session_state.get("company_gst", ""),
+                        },
+                        {
+                            "logo_bytes": st.session_state.get("invoice_logo_bytes"),
+                            "signature_bytes": st.session_state.get(
+                                "invoice_signature_bytes"
+                            ),
+                            "brand_color": st.session_state.get(
+                                "invoice_brand_color", "#1F4E79"
+                            ),
+                            "terms": st.session_state.get("invoice_terms", ""),
                         },
                     )
                     filename_base = re.sub(r"[^A-Za-z0-9_-]+", "_", label)

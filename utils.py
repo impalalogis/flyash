@@ -4,6 +4,7 @@ from datetime import date, datetime
 import re
 from typing import Iterable
 import io
+import textwrap
 
 import pandas as pd
 
@@ -195,9 +196,12 @@ def generate_invoice_pdf(
     sale_row: pd.Series,
     customer_row: pd.Series,
     company_info: dict[str, str],
+    branding: dict[str, object] | None = None,
 ) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
 
     buffer = io.BytesIO()
@@ -214,8 +218,41 @@ def generate_invoice_pdf(
     ).strip()
     invoice_date = str(sale_row.get("Date", "")).strip()
 
+    branding = branding or {}
+    brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
+    logo_bytes = branding.get("logo_bytes")
+    signature_bytes = branding.get("signature_bytes")
+    terms = str(branding.get("terms", "")).strip()
+
+    if logo_bytes:
+        try:
+            logo_reader = ImageReader(io.BytesIO(logo_bytes))
+            logo_width, logo_height = logo_reader.getSize()
+            max_width = 40 * mm
+            max_height = 20 * mm
+            scale = min(max_width / logo_width, max_height / logo_height)
+            render_width = logo_width * scale
+            render_height = logo_height * scale
+            pdf.drawImage(
+                logo_reader,
+                width - 20 * mm - render_width,
+                height - 25 * mm,
+                render_width,
+                render_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+        except Exception:
+            pass
+
+    pdf.setStrokeColor(HexColor(brand_color))
+    pdf.setLineWidth(2)
+    pdf.line(20 * mm, height - 30 * mm, width - 20 * mm, height - 30 * mm)
+
+    pdf.setFillColor(HexColor(brand_color))
     pdf.setFont("Helvetica-Bold", 16)
     pdf.drawString(20 * mm, height - 20 * mm, company_name)
+    pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
     y = height - 26 * mm
     if company_address:
@@ -228,8 +265,10 @@ def generate_invoice_pdf(
         pdf.drawString(20 * mm, y, f"GST: {company_gst}")
         y -= 4 * mm
 
+    pdf.setFillColor(HexColor(brand_color))
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(20 * mm, height - 45 * mm, "Invoice")
+    pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, height - 52 * mm, f"Invoice No: {invoice_no}")
     pdf.drawString(20 * mm, height - 57 * mm, f"Date: {invoice_date}")
@@ -284,6 +323,37 @@ def generate_invoice_pdf(
 
     pdf.setFont("Helvetica", 8)
     pdf.drawString(20 * mm, 20 * mm, "Thank you for your business.")
+
+    if terms:
+        pdf.setFont("Helvetica", 7)
+        text = pdf.beginText(20 * mm, 30 * mm)
+        text.textLine("Terms:")
+        for line in textwrap.wrap(terms, width=100):
+            text.textLine(line)
+        pdf.drawText(text)
+
+    if signature_bytes:
+        try:
+            sig_reader = ImageReader(io.BytesIO(signature_bytes))
+            sig_width, sig_height = sig_reader.getSize()
+            max_width = 40 * mm
+            max_height = 15 * mm
+            scale = min(max_width / sig_width, max_height / sig_height)
+            render_width = sig_width * scale
+            render_height = sig_height * scale
+            pdf.drawImage(
+                sig_reader,
+                width - 60 * mm,
+                25 * mm,
+                render_width,
+                render_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            pdf.setFont("Helvetica", 8)
+            pdf.drawString(width - 60 * mm, 20 * mm, "Authorized Signatory")
+        except Exception:
+            pass
 
     pdf.showPage()
     pdf.save()
