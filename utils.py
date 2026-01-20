@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+import re
 from typing import Iterable
 
 import pandas as pd
@@ -82,6 +83,59 @@ def ensure_ids(data_frame: pd.DataFrame, id_column: str, prefix: str, generator)
     for idx in data_frame[missing_mask].index:
         data_frame.at[idx, id_column] = generator(prefix)
     return data_frame
+
+
+def _name_tokens(name: str) -> list[str]:
+    cleaned = re.sub(r"[^A-Za-z0-9 ]+", " ", str(name)).strip()
+    tokens = [token for token in cleaned.split() if token]
+    return [token.upper() for token in tokens]
+
+
+def _next_increment(base: str, existing_ids: list[str]) -> int:
+    max_suffix = 0
+    prefix = f"{base}-"
+    for value in existing_ids:
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if not value.startswith(prefix):
+            continue
+        parts = value.split("-")
+        if not parts:
+            continue
+        tail = parts[-1]
+        if tail.isdigit():
+            max_suffix = max(max_suffix, int(tail))
+    return max_suffix + 1
+
+
+def generate_named_id(prefix: str, name: str, existing_ids: list[str]) -> str:
+    tokens = _name_tokens(name)
+    first = tokens[0] if tokens else "NAME"
+    last = tokens[-1] if len(tokens) > 1 else first
+    base = f"{prefix}-{first}-{last}"
+    suffix = _next_increment(base, existing_ids)
+    return f"{base}-{suffix:03d}"
+
+
+def _parse_date(value: object) -> date:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except ValueError:
+        return datetime.utcnow().date()
+
+
+def generate_log_id(prefix: str, entry_date: object, existing_ids: list[str]) -> str:
+    parsed_date = _parse_date(entry_date)
+    date_part = parsed_date.strftime("%d-%m-%y")
+    time_part = datetime.utcnow().strftime("%H%M%S")
+    base = f"{prefix}-{date_part}"
+    suffix = _next_increment(base, existing_ids)
+    return f"{base}-{time_part}-{suffix:03d}"
 
 
 def build_validation_mask(

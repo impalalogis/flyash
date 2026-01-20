@@ -208,3 +208,11 @@ def generate_id(prefix: str) -> str:
     timestamp = datetime.utcnow().strftime("%Y%m%d")
     unique = uuid.uuid4().hex[:6].upper()
     return f"{prefix}-{timestamp}-{unique}"
+
+
+def generate_named_id(prefix: str, name: str, existing_ids: list[str] | None = None) -> str:
+    return utils.generate_named_id(prefix, name, existing_ids or [])
+
+
+def generate_log_id(prefix: str, entry_date: object, existing_ids: list[str] | None = None) -> str:
+    return utils.generate_log_id(prefix, entry_date, existing_ids or [])

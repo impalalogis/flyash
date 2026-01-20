@@ -94,8 +94,16 @@ def render() -> None:
             for error in errors:
                 st.error(error)
         else:
+            existing_ids = (
+                database.read_table("Production_Log")
+                .get("Prod_ID", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
+            prod_id = database.generate_log_id("PROD", prod_date, existing_ids)
             data = {
-                "Prod_ID": database.generate_id("PROD"),
+                "Prod_ID": prod_id,
                 "Date": prod_date.isoformat(),
                 "Month": utils.to_month_string(prod_date),
                 "No_of_Bricks": no_of_bricks,

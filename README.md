@@ -160,37 +160,135 @@ from the JSON key (the `client_email` field).
 2. Start Streamlit:
    - `streamlit run app.py`
 
+## ID formats
+- Customers: `CUST-FIRST-LAST-001`
+- Suppliers: `SUP-FIRST-LAST-001`
+- Labour: `LAB-FIRST-LAST-001`
+- Logs (RM/PROD/SAL/PAY/ATT): `PREFIX-dd-mm-yy-HHMMSS-001`
+
 ## Optional: auto-generate IDs for manual sheet entry
 If you add rows directly in Google Sheets, you can use Apps Script to
-auto-fill ID columns. Open Extensions -> Apps Script, paste the script below,
-and save it.
+auto-fill IDs or rebuild them for all historical records.
+Open Extensions -> Apps Script, paste the script below, and save it.
 
 ```javascript
-const ID_CONFIG = {
-  Suppliers: { column: 1, prefix: "SUP" },
-  Customers: { column: 1, prefix: "CUS" },
-  Labour: { column: 1, prefix: "LAB" },
-  Labour_Attendance: { column: 1, prefix: "ATT" },
-  Raw_Material_Log: { column: 1, prefix: "RM" },
-  Production_Log: { column: 1, prefix: "PROD" },
-  Sales_Log: { column: 1, prefix: "SAL" },
-  Payments: { column: 1, prefix: "PAY" },
+const ID_RULES = {
+  Suppliers: { idCol: 1, type: "named", prefix: "SUP", nameCol: 2 },
+  Customers: { idCol: 1, type: "named", prefix: "CUST", nameCol: 2 },
+  Labour: { idCol: 1, type: "named", prefix: "LAB", nameCol: 2 },
+  Raw_Material_Log: { idCol: 1, type: "log", prefix: "RM", dateCol: 2 },
+  Production_Log: { idCol: 1, type: "log", prefix: "PROD", dateCol: 2 },
+  Sales_Log: { idCol: 1, type: "log", prefix: "SAL", dateCol: 2 },
+  Payments: { idCol: 1, type: "log", prefix: "PAY", dateCol: 2 },
+  Labour_Attendance: { idCol: 1, type: "log", prefix: "ATT", dateCol: 2 },
 };
 
 function onEdit(e) {
   const sheet = e.range.getSheet();
-  const config = ID_CONFIG[sheet.getName()];
-  if (!config) return;
+  const rule = ID_RULES[sheet.getName()];
+  if (!rule) return;
   const row = e.range.getRow();
   if (row === 1) return;
-  const idCell = sheet.getRange(row, config.column);
+  const idCell = sheet.getRange(row, rule.idCol);
   if (idCell.getValue()) return;
-  idCell.setValue(generateId(config.prefix));
+
+  const rowValues = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const counters = {};
+  idCell.setValue(buildId(rule, rowValues, counters));
 }
 
-function generateId(prefix) {
-  const date = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
-  const token = Utilities.getUuid().replace(/-/g, "").substring(0, 6).toUpperCase();
-  return `${prefix}-${date}-${token}`;
+// Run this to update all IDs (set force=true to rewrite every row).
+function normalizeAllIds(force = false) {
+  const ss = SpreadsheetApp.getActive();
+  Object.keys(ID_RULES).forEach((sheetName) => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+    const rule = ID_RULES[sheetName];
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return;
+
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const counters = {};
+
+    // First pass: register existing IDs to keep numbering stable.
+    data.forEach((row) => {
+      const id = row[rule.idCol - 1];
+      if (!id) return;
+      const base = getBase(rule, id);
+      if (!base) return;
+      const suffix = getSuffix(id);
+      if (suffix !== null) {
+        counters[base] = Math.max(counters[base] || 0, suffix);
+      }
+    });
+
+    // Second pass: generate IDs.
+    data.forEach((row) => {
+      const id = row[rule.idCol - 1];
+      if (id && !force) return;
+      row[rule.idCol - 1] = buildId(rule, row, counters);
+    });
+
+    sheet.getRange(2, 1, data.length, lastCol).setValues(data);
+  });
+}
+
+function buildId(rule, rowValues, counters) {
+  if (rule.type === "named") {
+    const name = rowValues[rule.nameCol - 1];
+    const base = `${rule.prefix}-${nameToken(name, 0)}-${nameToken(name, -1)}`;
+    const next = nextCounter(base, counters);
+    return `${base}-${pad3(next)}`;
+  }
+  const dateValue = rowValues[rule.dateCol - 1];
+  const datePart = formatDatePart(dateValue);
+  const base = `${rule.prefix}-${datePart}`;
+  const next = nextCounter(base, counters);
+  const timePart = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "HHmmss");
+  return `${base}-${timePart}-${pad3(next)}`;
+}
+
+function nameToken(value, index) {
+  const cleaned = String(value || "")
+    .replace(/[^A-Za-z0-9 ]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t);
+  if (!cleaned.length) return "NAME";
+  const token = index === 0 ? cleaned[0] : cleaned[cleaned.length - 1];
+  return token.toUpperCase();
+}
+
+function formatDatePart(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "dd-MM-yy");
+}
+
+function nextCounter(base, counters) {
+  const next = (counters[base] || 0) + 1;
+  counters[base] = next;
+  return next;
+}
+
+function getSuffix(id) {
+  const parts = String(id || "").split("-");
+  const last = parts[parts.length - 1];
+  return /^\d+$/.test(last) ? parseInt(last, 10) : null;
+}
+
+function getBase(rule, id) {
+  const parts = String(id || "").split("-");
+  if (rule.type === "named" && parts.length >= 3) {
+    return parts.slice(0, 3).join("-");
+  }
+  if (rule.type === "log" && parts.length >= 4) {
+    return parts.slice(0, 4).join("-");
+  }
+  return "";
+}
+
+function pad3(value) {
+  return String(value).padStart(3, "0");
 }
 ```
