@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 import streamlit as st
+import re
 
 import database
 import utils
@@ -197,6 +198,78 @@ def render() -> None:
                 database.delete_row("Sales_Log", sales_id)
             st.success("Selected entries deleted.")
             st.rerun()
+
+    st.subheader("Generate Invoice (PDF)")
+    if entries.empty:
+        st.info("No sales records available for invoices.")
+    else:
+        invoice_labels = []
+        for _, row in entries.iterrows():
+            sales_id = str(row.get("Sales_ID", "")).strip()
+            invoice_no = str(row.get("Invoice_No", "")).strip()
+            customer_id = str(row.get("Customer_ID", "")).strip()
+            sale_date = str(row.get("Date", "")).strip()
+            label = f"{invoice_no or sales_id} | {customer_id} | {sale_date}"
+            invoice_labels.append((label, sales_id))
+        invoice_labels = [item for item in invoice_labels if item[1]]
+
+        if invoice_labels:
+            label = st.selectbox(
+                "Select Sale",
+                [item[0] for item in invoice_labels],
+                key="invoice_select",
+            )
+            selected_id = dict(invoice_labels).get(label, "")
+            selected_row = entries.loc[entries["Sales_ID"] == selected_id]
+            if not selected_row.empty:
+                selected_row = selected_row.iloc[0]
+                customer_id = str(selected_row.get("Customer_ID", "")).strip()
+                customer_row = customers.loc[customers["Customer_ID"] == customer_id]
+                if customer_row.empty:
+                    st.error("Customer record not found for this sale.")
+                else:
+                    customer_row = customer_row.iloc[0]
+                    with st.expander("Company details", expanded=False):
+                        company_name = st.text_input(
+                            "Company Name",
+                            value=st.session_state.get("company_name", "Fly-Ash Brick Unit"),
+                        )
+                        company_address = st.text_input(
+                            "Address",
+                            value=st.session_state.get("company_address", ""),
+                        )
+                        company_contact = st.text_input(
+                            "Contact",
+                            value=st.session_state.get("company_contact", ""),
+                        )
+                        company_gst = st.text_input(
+                            "GST",
+                            value=st.session_state.get("company_gst", ""),
+                        )
+                        st.session_state["company_name"] = company_name
+                        st.session_state["company_address"] = company_address
+                        st.session_state["company_contact"] = company_contact
+                        st.session_state["company_gst"] = company_gst
+
+                    pdf_bytes = utils.generate_invoice_pdf(
+                        selected_row,
+                        customer_row,
+                        {
+                            "name": st.session_state.get("company_name", ""),
+                            "address": st.session_state.get("company_address", ""),
+                            "contact": st.session_state.get("company_contact", ""),
+                            "gst": st.session_state.get("company_gst", ""),
+                        },
+                    )
+                    filename_base = re.sub(r"[^A-Za-z0-9_-]+", "_", label)
+                    st.download_button(
+                        "Download Invoice PDF",
+                        data=pdf_bytes,
+                        file_name=f"{filename_base}.pdf",
+                        mime="application/pdf",
+                    )
+        else:
+            st.info("Sales IDs are missing. Update or rebuild IDs.")
 
     st.subheader("Validation")
     rules = {

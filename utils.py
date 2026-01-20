@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import re
 from typing import Iterable
+import io
 
 import pandas as pd
 
@@ -188,6 +189,106 @@ def style_invalid(data_frame: pd.DataFrame, mask: pd.DataFrame) -> pd.io.formats
         ]
 
     return data_frame.style.apply(_style_row, axis=1)
+
+
+def generate_invoice_pdf(
+    sale_row: pd.Series,
+    customer_row: pd.Series,
+    company_info: dict[str, str],
+) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    company_name = company_info.get("name", "Fly-Ash Brick Unit")
+    company_address = company_info.get("address", "")
+    company_contact = company_info.get("contact", "")
+    company_gst = company_info.get("gst", "")
+
+    invoice_no = str(sale_row.get("Invoice_No", "")).strip() or str(
+        sale_row.get("Sales_ID", "")
+    ).strip()
+    invoice_date = str(sale_row.get("Date", "")).strip()
+
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(20 * mm, height - 20 * mm, company_name)
+    pdf.setFont("Helvetica", 9)
+    y = height - 26 * mm
+    if company_address:
+        pdf.drawString(20 * mm, y, company_address)
+        y -= 4 * mm
+    if company_contact:
+        pdf.drawString(20 * mm, y, f"Contact: {company_contact}")
+        y -= 4 * mm
+    if company_gst:
+        pdf.drawString(20 * mm, y, f"GST: {company_gst}")
+        y -= 4 * mm
+
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(20 * mm, height - 45 * mm, "Invoice")
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, height - 52 * mm, f"Invoice No: {invoice_no}")
+    pdf.drawString(20 * mm, height - 57 * mm, f"Date: {invoice_date}")
+
+    customer_name = str(customer_row.get("Name", "")).strip()
+    customer_address = str(customer_row.get("Address", "")).strip()
+    customer_contact = str(customer_row.get("Contact", "")).strip()
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, height - 70 * mm, "Bill To:")
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, height - 75 * mm, customer_name)
+    if customer_address:
+        pdf.drawString(20 * mm, height - 80 * mm, customer_address)
+    if customer_contact:
+        pdf.drawString(20 * mm, height - 85 * mm, f"Contact: {customer_contact}")
+
+    table_y = height - 100 * mm
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, table_y, "Description")
+    pdf.drawRightString(120 * mm, table_y, "Qty")
+    pdf.drawRightString(150 * mm, table_y, "Rate")
+    pdf.drawRightString(190 * mm, table_y, "Amount")
+
+    qty = safe_float(sale_row.get("No_of_Bricks", 0))
+    rate = safe_float(sale_row.get("Rate", 0))
+    amount = safe_float(sale_row.get("Amount", qty * rate))
+    freight = safe_float(sale_row.get("Freight", 0))
+    total = safe_float(sale_row.get("Total_Amount", amount + freight))
+    received = safe_float(sale_row.get("Amount_Received", 0))
+    due = safe_float(sale_row.get("Due", total - received))
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, table_y - 6 * mm, "Fly-ash bricks")
+    pdf.drawRightString(120 * mm, table_y - 6 * mm, f"{qty:,.0f}")
+    pdf.drawRightString(150 * mm, table_y - 6 * mm, f"{rate:,.2f}")
+    pdf.drawRightString(190 * mm, table_y - 6 * mm, f"{amount:,.2f}")
+
+    pdf.drawString(20 * mm, table_y - 14 * mm, "Freight")
+    pdf.drawRightString(190 * mm, table_y - 14 * mm, f"{freight:,.2f}")
+
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, table_y - 24 * mm, "Total")
+    pdf.drawRightString(190 * mm, table_y - 24 * mm, f"{total:,.2f}")
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, table_y - 32 * mm, "Amount Received")
+    pdf.drawRightString(190 * mm, table_y - 32 * mm, f"{received:,.2f}")
+
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, table_y - 40 * mm, "Balance Due")
+    pdf.drawRightString(190 * mm, table_y - 40 * mm, f"{due:,.2f}")
+
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(20 * mm, 20 * mm, "Thank you for your business.")
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.read()
 
 
 def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.DataFrame:
