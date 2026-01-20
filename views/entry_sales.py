@@ -246,6 +246,9 @@ def render() -> None:
                         "signature_bytes": utils.decode_base64_data(
                             invoice_secrets.get("signature_base64")
                         ),
+                        "font_bytes": utils.decode_base64_data(
+                            invoice_secrets.get("font_ttf_base64")
+                        ),
                         "terms": str(invoice_secrets.get("terms", "")).strip(),
                     }
                     has_company_defaults = any(company_defaults.values())
@@ -253,6 +256,7 @@ def render() -> None:
                         [
                             branding_defaults["logo_bytes"],
                             branding_defaults["signature_bytes"],
+                            branding_defaults["font_bytes"],
                             branding_defaults["terms"],
                         ]
                     )
@@ -303,6 +307,7 @@ def render() -> None:
                     with st.expander("Branding", expanded=False):
                         logo_bytes = None
                         signature_bytes = None
+                        font_bytes = branding_defaults["font_bytes"]
                         override_branding = st.checkbox(
                             "Override branding for this invoice",
                             value=not has_branding_defaults,
@@ -347,12 +352,14 @@ def render() -> None:
                             terms = branding_defaults["terms"]
                             logo_bytes = branding_defaults["logo_bytes"]
                             signature_bytes = branding_defaults["signature_bytes"]
+                            font_bytes = branding_defaults["font_bytes"]
                             st.color_picker("Brand color", value=brand_color, disabled=True)
                             st.text_area("Terms and notes", value=terms, height=80, disabled=True)
                             st.write(
                                 {
                                     "logo": "set" if logo_bytes else "not set",
                                     "signature": "set" if signature_bytes else "not set",
+                                    "font": "set" if font_bytes else "not set",
                                 }
                             )
 
@@ -370,6 +377,7 @@ def render() -> None:
                             "signature_bytes": signature_bytes,
                             "brand_color": brand_color,
                             "terms": terms,
+                            "font_bytes": font_bytes,
                         },
                     )
                     filename_base = re.sub(r"[^A-Za-z0-9_-]+", "_", label)

@@ -167,6 +167,7 @@ company_gst = "GSTIN"
 brand_color = "#1F4E79"
 logo_base64 = "BASE64_STRING"
 signature_base64 = "BASE64_STRING"
+font_ttf_base64 = "BASE64_STRING"
 terms = "Goods once sold will not be taken back."
 ```
 
@@ -175,6 +176,15 @@ To get base64:
 python - <<'PY'
 import base64
 with open("logo.png", "rb") as f:
+    print(base64.b64encode(f.read()).decode())
+PY
+```
+
+For Hindi/Unicode text, use a font such as **NotoSansDevanagari.ttf**:
+```
+python - <<'PY'
+import base64
+with open("NotoSansDevanagari-Regular.ttf", "rb") as f:
     print(base64.b64encode(f.read()).decode())
 PY
 ```
