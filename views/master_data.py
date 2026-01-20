@@ -64,7 +64,19 @@ def _edit_table(
         non_id_columns = [column for column in columns if column != id_column]
         updated = updated.replace("", pd.NA)
         updated = updated.dropna(how="all", subset=non_id_columns)
-        updated = utils.ensure_ids(updated, id_column, id_prefix, database.generate_id)
+
+        existing_ids = (
+            updated.get(id_column, pd.Series(dtype=str)).astype(str).str.strip().tolist()
+        )
+        for idx in updated.index:
+            current = str(updated.at[idx, id_column]).strip() if id_column in updated.columns else ""
+            if current:
+                continue
+            name_value = str(updated.at[idx, "Name"]) if "Name" in updated.columns else ""
+            new_id = database.generate_named_id(id_prefix, name_value, existing_ids)
+            updated.at[idx, id_column] = new_id
+            existing_ids.append(new_id)
+
         updated = updated.fillna("")
         updated = utils.ensure_columns(updated, columns)
 
@@ -108,7 +120,7 @@ def render() -> None:
             "Customers",
             "Customers",
             CUSTOMERS_COLUMNS,
-            "CUS",
+            "CUST",
             "Customer_ID",
             required_columns=["Name"],
             numeric_columns=["Outstanding_Balance", "Credit_Limit"],
@@ -130,3 +142,26 @@ def render() -> None:
                 ),
             },
         )
+
+    st.divider()
+    st.subheader("ID Maintenance")
+    st.caption(
+        "Use this to fill missing IDs or rebuild all IDs. "
+        "Rebuilding updates all related references."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Fill missing IDs", key="fill_missing_ids"):
+            summary = database.rebuild_all_ids(force=False)
+            st.success("Missing IDs filled.")
+            st.json(summary)
+    with col2:
+        confirm = st.checkbox("I understand this will rewrite IDs", value=False)
+        confirm_text = st.text_input("Type REBUILD to confirm", value="")
+        if st.button("Rebuild all IDs", key="rebuild_all_ids"):
+            if not confirm or confirm_text.strip().upper() != "REBUILD":
+                st.error("Confirmation required to rebuild IDs.")
+            else:
+                summary = database.rebuild_all_ids(force=True)
+                st.success("All IDs rebuilt.")
+                st.json(summary)

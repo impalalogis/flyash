@@ -105,8 +105,16 @@ def render() -> None:
             for error in errors:
                 st.error(error)
         else:
+            existing_ids = (
+                database.read_table("Sales_Log")
+                .get("Sales_ID", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
+            sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
             data = {
-                "Sales_ID": database.generate_id("SAL"),
+                "Sales_ID": sales_id,
                 "Date": sale_date.isoformat(),
                 "Month": utils.to_month_string(sale_date),
                 "Customer_ID": customer_id,

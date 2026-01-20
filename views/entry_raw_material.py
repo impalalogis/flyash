@@ -127,8 +127,16 @@ def render() -> None:
             for error in errors:
                 st.error(error)
         else:
+            existing_ids = (
+                database.read_table("Raw_Material_Log")
+                .get("RM_ID", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
+            rm_id = database.generate_log_id("RM", material_date, existing_ids)
             data = {
-                "RM_ID": database.generate_id("RM"),
+                "RM_ID": rm_id,
                 "Date": material_date.isoformat(),
                 "Month": utils.to_month_string(material_date),
                 "Supplier_ID": supplier_id,

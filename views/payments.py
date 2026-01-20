@@ -73,8 +73,16 @@ def render() -> None:
             for error in errors:
                 st.error(error)
         else:
+            existing_ids = (
+                database.read_table("Payments")
+                .get("Payment_ID", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
+            payment_id = database.generate_log_id("PAY", payment_date, existing_ids)
             data = {
-                "Payment_ID": database.generate_id("PAY"),
+                "Payment_ID": payment_id,
                 "Customer_ID": customer_id,
                 "Invoice_No": invoice_no,
                 "Amount_Paid": amount_paid,

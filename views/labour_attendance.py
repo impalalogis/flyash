@@ -61,8 +61,12 @@ def _sync_production_log(
     date_str = attendance_date.isoformat()
 
     if day_rows.empty:
+        existing_ids = (
+            production_df.get("Prod_ID", pd.Series(dtype=str)).astype(str).str.strip().tolist()
+        )
+        prod_id = database.generate_log_id("PROD", attendance_date, existing_ids)
         data = {
-            "Prod_ID": database.generate_id("PROD"),
+            "Prod_ID": prod_id,
             "Date": date_str,
             "Month": utils.to_month_string(attendance_date),
             "No_of_Bricks": 0,
@@ -165,6 +169,12 @@ def render() -> None:
             st.error("No labour rows to save.")
             return
 
+        existing_ids = (
+            attendance_df.get("Attendance_ID", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .tolist()
+        )
         new_rows = []
         for _, row in edited.iterrows():
             labour_id = str(row.get("Labour_ID", "")).strip()
@@ -173,9 +183,11 @@ def render() -> None:
                 st.error("Labour_ID is required for all rows.")
                 return
             status = "Present" if bool(row.get("Present")) else "Absent"
+            attendance_id = database.generate_log_id("ATT", attendance_date, existing_ids)
+            existing_ids.append(attendance_id)
             new_rows.append(
                 {
-                    "Attendance_ID": database.generate_id("ATT"),
+                    "Attendance_ID": attendance_id,
                     "Date": date_str,
                     "Labour_ID": labour_id,
                     "Name": name,

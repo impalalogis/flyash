@@ -208,3 +208,198 @@ def generate_id(prefix: str) -> str:
     timestamp = datetime.utcnow().strftime("%Y%m%d")
     unique = uuid.uuid4().hex[:6].upper()
     return f"{prefix}-{timestamp}-{unique}"
+
+
+def generate_named_id(prefix: str, name: str, existing_ids: list[str] | None = None) -> str:
+    return utils.generate_named_id(prefix, name, existing_ids or [])
+
+
+def generate_log_id(prefix: str, entry_date: object, existing_ids: list[str] | None = None) -> str:
+    return utils.generate_log_id(prefix, entry_date, existing_ids or [])
+
+
+def _update_foreign_keys(
+    table_name: str,
+    column: str,
+    mapping: dict[str, str],
+    *,
+    recompute_stock: bool = True,
+) -> int:
+    if not mapping:
+        return 0
+    data_frame = read_table(table_name)
+    if data_frame.empty or column not in data_frame.columns:
+        return 0
+
+    def _map_value(value: object) -> str:
+        if value is None:
+            return ""
+        key = str(value).strip()
+        if not key:
+            return ""
+        return mapping.get(key, key)
+
+    updated = data_frame.copy()
+    updated[column] = updated[column].apply(_map_value)
+    changed = int((updated[column] != data_frame[column].astype(str)).sum())
+    replace_table(table_name, updated, recompute_stock=recompute_stock)
+    return changed
+
+
+def _rebuild_named_ids(
+    table_name: str,
+    id_column: str,
+    prefix: str,
+    *,
+    name_column: str = "Name",
+    force: bool = False,
+) -> tuple[dict[str, str], int]:
+    data_frame = read_table(table_name)
+    if data_frame.empty:
+        return {}, 0
+    data_frame = data_frame.copy()
+    if id_column not in data_frame.columns:
+        data_frame[id_column] = ""
+    if name_column not in data_frame.columns:
+        data_frame[name_column] = ""
+
+    existing_ids = [] if force else (
+        data_frame[id_column].astype(str).str.strip().tolist()
+    )
+    mapping: dict[str, str] = {}
+    updated_count = 0
+    for idx in data_frame.index:
+        old_id = str(data_frame.at[idx, id_column]).strip()
+        if old_id and not force:
+            continue
+        name = str(data_frame.at[idx, name_column])
+        new_id = generate_named_id(prefix, name, existing_ids)
+        data_frame.at[idx, id_column] = new_id
+        existing_ids.append(new_id)
+        if old_id and old_id != new_id:
+            mapping[old_id] = new_id
+        updated_count += 1
+
+    replace_table(table_name, data_frame, recompute_stock=False)
+    return mapping, updated_count
+
+
+def _rebuild_log_ids(
+    table_name: str,
+    id_column: str,
+    prefix: str,
+    *,
+    date_column: str = "Date",
+    force: bool = False,
+) -> int:
+    data_frame = read_table(table_name)
+    if data_frame.empty:
+        return 0
+    data_frame = data_frame.copy()
+    if id_column not in data_frame.columns:
+        data_frame[id_column] = ""
+    if date_column not in data_frame.columns:
+        data_frame[date_column] = ""
+
+    existing_ids = [] if force else (
+        data_frame[id_column].astype(str).str.strip().tolist()
+    )
+    updated_count = 0
+    for idx in data_frame.index:
+        old_id = str(data_frame.at[idx, id_column]).strip()
+        if old_id and not force:
+            continue
+        entry_date = data_frame.at[idx, date_column]
+        new_id = generate_log_id(prefix, entry_date, existing_ids)
+        data_frame.at[idx, id_column] = new_id
+        existing_ids.append(new_id)
+        updated_count += 1
+
+    replace_table(table_name, data_frame, recompute_stock=False)
+    return updated_count
+
+
+def rebuild_all_ids(*, force: bool = False) -> dict[str, int]:
+    summary: dict[str, int] = {}
+
+    supplier_map, supplier_count = _rebuild_named_ids(
+        "Suppliers",
+        "Supplier_ID",
+        "SUP",
+        force=force,
+    )
+    summary["Suppliers"] = supplier_count
+    if supplier_map:
+        summary["Raw_Material_Log.Supplier_ID"] = _update_foreign_keys(
+            "Raw_Material_Log",
+            "Supplier_ID",
+            supplier_map,
+            recompute_stock=False,
+        )
+
+    customer_map, customer_count = _rebuild_named_ids(
+        "Customers",
+        "Customer_ID",
+        "CUST",
+        force=force,
+    )
+    summary["Customers"] = customer_count
+    if customer_map:
+        summary["Sales_Log.Customer_ID"] = _update_foreign_keys(
+            "Sales_Log",
+            "Customer_ID",
+            customer_map,
+        )
+        summary["Payments.Customer_ID"] = _update_foreign_keys(
+            "Payments",
+            "Customer_ID",
+            customer_map,
+        )
+
+    labour_map, labour_count = _rebuild_named_ids(
+        "Labour",
+        "Labour_ID",
+        "LAB",
+        force=force,
+    )
+    summary["Labour"] = labour_count
+    if labour_map:
+        summary["Labour_Attendance.Labour_ID"] = _update_foreign_keys(
+            "Labour_Attendance",
+            "Labour_ID",
+            labour_map,
+        )
+
+    summary["Raw_Material_Log"] = _rebuild_log_ids(
+        "Raw_Material_Log",
+        "RM_ID",
+        "RM",
+        force=force,
+    )
+    summary["Production_Log"] = _rebuild_log_ids(
+        "Production_Log",
+        "Prod_ID",
+        "PROD",
+        force=force,
+    )
+    summary["Sales_Log"] = _rebuild_log_ids(
+        "Sales_Log",
+        "Sales_ID",
+        "SAL",
+        force=force,
+    )
+    summary["Payments"] = _rebuild_log_ids(
+        "Payments",
+        "Payment_ID",
+        "PAY",
+        force=force,
+    )
+    summary["Labour_Attendance"] = _rebuild_log_ids(
+        "Labour_Attendance",
+        "Attendance_ID",
+        "ATT",
+        force=force,
+    )
+
+    update_stock_log()
+    return summary
