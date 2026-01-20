@@ -113,16 +113,28 @@ def render() -> None:
             sales_month["Month"] = sales_month["Date"].apply(
                 lambda value: utils.to_month_string(value) if pd.notnull(value) else ""
             )
+        sales_month["Total_Amount"] = pd.to_numeric(
+            sales_month.get("Total_Amount", pd.Series(dtype=float)),
+            errors="coerce",
+        ).fillna(0.0)
         cost_month = raw_filtered.copy()
         if "Month" not in cost_month.columns:
             cost_month["Month"] = cost_month["Date"].apply(
                 lambda value: utils.to_month_string(value) if pd.notnull(value) else ""
             )
+        cost_month["Total_Cost"] = pd.to_numeric(
+            cost_month.get("Total_Cost", pd.Series(dtype=float)),
+            errors="coerce",
+        ).fillna(0.0)
         labour_month = production_filtered.copy()
         if "Month" not in labour_month.columns:
             labour_month["Month"] = labour_month["Date"].apply(
                 lambda value: utils.to_month_string(value) if pd.notnull(value) else ""
             )
+        labour_month["Labour_Expense"] = pd.to_numeric(
+            labour_month.get("Labour_Expense", pd.Series(dtype=float)),
+            errors="coerce",
+        ).fillna(0.0)
 
         sales_summary = (
             sales_month.groupby("Month", dropna=False)["Total_Amount"]
