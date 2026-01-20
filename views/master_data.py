@@ -142,3 +142,26 @@ def render() -> None:
                 ),
             },
         )
+
+    st.divider()
+    st.subheader("ID Maintenance")
+    st.caption(
+        "Use this to fill missing IDs or rebuild all IDs. "
+        "Rebuilding updates all related references."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Fill missing IDs", key="fill_missing_ids"):
+            summary = database.rebuild_all_ids(force=False)
+            st.success("Missing IDs filled.")
+            st.json(summary)
+    with col2:
+        confirm = st.checkbox("I understand this will rewrite IDs", value=False)
+        confirm_text = st.text_input("Type REBUILD to confirm", value="")
+        if st.button("Rebuild all IDs", key="rebuild_all_ids"):
+            if not confirm or confirm_text.strip().upper() != "REBUILD":
+                st.error("Confirmation required to rebuild IDs.")
+            else:
+                summary = database.rebuild_all_ids(force=True)
+                st.success("All IDs rebuilt.")
+                st.json(summary)
