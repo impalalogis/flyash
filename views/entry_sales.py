@@ -5,6 +5,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 import re
+from urllib.parse import quote
 
 import database
 import utils
@@ -246,16 +247,34 @@ def render() -> None:
                         "signature_bytes": utils.decode_base64_data(
                             invoice_secrets.get("signature_base64")
                         ),
+                        "font_bytes": utils.decode_base64_data(
+                            invoice_secrets.get("font_ttf_base64")
+                        ),
                         "terms": str(invoice_secrets.get("terms", "")).strip(),
+                        "watermark_text": str(
+                            invoice_secrets.get("watermark_text", "")
+                        ).strip(),
+                    }
+                    payment_defaults = {
+                        "upi_id": str(invoice_secrets.get("upi_id", "")).strip(),
+                        "bank_name": str(invoice_secrets.get("bank_name", "")).strip(),
+                        "account_no": str(invoice_secrets.get("account_no", "")).strip(),
+                        "ifsc": str(invoice_secrets.get("ifsc", "")).strip(),
+                        "note": str(invoice_secrets.get("payment_note", "")).strip(),
+                        "label": str(invoice_secrets.get("payment_label", "")).strip(),
+                        "qr_data": str(invoice_secrets.get("qr_data", "")).strip(),
                     }
                     has_company_defaults = any(company_defaults.values())
                     has_branding_defaults = any(
                         [
                             branding_defaults["logo_bytes"],
                             branding_defaults["signature_bytes"],
+                            branding_defaults["font_bytes"],
                             branding_defaults["terms"],
+                            branding_defaults["watermark_text"],
                         ]
                     )
+                    has_payment_defaults = any(payment_defaults.values())
 
                     with st.expander("Company details", expanded=False):
                         override_company = st.checkbox(
@@ -303,6 +322,7 @@ def render() -> None:
                     with st.expander("Branding", expanded=False):
                         logo_bytes = None
                         signature_bytes = None
+                        font_bytes = branding_defaults["font_bytes"]
                         override_branding = st.checkbox(
                             "Override branding for this invoice",
                             value=not has_branding_defaults,
@@ -325,6 +345,13 @@ def render() -> None:
                                     "invoice_brand_color", branding_defaults["brand_color"]
                                 ),
                             )
+                            watermark_text = st.text_input(
+                                "Watermark text",
+                                value=st.session_state.get(
+                                    "invoice_watermark_text",
+                                    branding_defaults["watermark_text"],
+                                ),
+                            )
                             terms = st.text_area(
                                 "Terms and notes",
                                 value=st.session_state.get(
@@ -339,22 +366,106 @@ def render() -> None:
                                     signature_file.getvalue()
                                 )
                             st.session_state["invoice_brand_color"] = brand_color
+                            st.session_state["invoice_watermark_text"] = watermark_text
                             st.session_state["invoice_terms"] = terms
                             logo_bytes = st.session_state.get("invoice_logo_bytes")
                             signature_bytes = st.session_state.get("invoice_signature_bytes")
                         else:
                             brand_color = branding_defaults["brand_color"]
                             terms = branding_defaults["terms"]
+                            watermark_text = branding_defaults["watermark_text"]
                             logo_bytes = branding_defaults["logo_bytes"]
                             signature_bytes = branding_defaults["signature_bytes"]
+                            font_bytes = branding_defaults["font_bytes"]
                             st.color_picker("Brand color", value=brand_color, disabled=True)
+                            st.text_input(
+                                "Watermark text",
+                                value=watermark_text,
+                                disabled=True,
+                            )
                             st.text_area("Terms and notes", value=terms, height=80, disabled=True)
                             st.write(
                                 {
                                     "logo": "set" if logo_bytes else "not set",
                                     "signature": "set" if signature_bytes else "not set",
+                                    "font": "set" if font_bytes else "not set",
                                 }
                             )
+                    with st.expander("Payment details", expanded=False):
+                        override_payment = st.checkbox(
+                            "Override payment details for this invoice",
+                            value=not has_payment_defaults,
+                            key="invoice_override_payment",
+                        )
+                        if override_payment:
+                            upi_id = st.text_input(
+                                "UPI ID",
+                                value=st.session_state.get(
+                                    "invoice_upi_id", payment_defaults["upi_id"]
+                                ),
+                            )
+                            bank_name = st.text_input(
+                                "Bank Name",
+                                value=st.session_state.get(
+                                    "invoice_bank_name", payment_defaults["bank_name"]
+                                ),
+                            )
+                            account_no = st.text_input(
+                                "Account No",
+                                value=st.session_state.get(
+                                    "invoice_account_no", payment_defaults["account_no"]
+                                ),
+                            )
+                            ifsc = st.text_input(
+                                "IFSC",
+                                value=st.session_state.get(
+                                    "invoice_ifsc", payment_defaults["ifsc"]
+                                ),
+                            )
+                            payment_note = st.text_input(
+                                "Payment Note",
+                                value=st.session_state.get(
+                                    "invoice_payment_note", payment_defaults["note"]
+                                ),
+                            )
+                            payment_label = st.text_input(
+                                "Payment Label",
+                                value=st.session_state.get(
+                                    "invoice_payment_label", payment_defaults["label"]
+                                ),
+                            )
+                            qr_data = st.text_input(
+                                "QR Data (optional)",
+                                value=st.session_state.get(
+                                    "invoice_qr_data", payment_defaults["qr_data"]
+                                ),
+                            )
+                            st.session_state["invoice_upi_id"] = upi_id
+                            st.session_state["invoice_bank_name"] = bank_name
+                            st.session_state["invoice_account_no"] = account_no
+                            st.session_state["invoice_ifsc"] = ifsc
+                            st.session_state["invoice_payment_note"] = payment_note
+                            st.session_state["invoice_payment_label"] = payment_label
+                            st.session_state["invoice_qr_data"] = qr_data
+                        else:
+                            upi_id = payment_defaults["upi_id"]
+                            bank_name = payment_defaults["bank_name"]
+                            account_no = payment_defaults["account_no"]
+                            ifsc = payment_defaults["ifsc"]
+                            payment_note = payment_defaults["note"]
+                            payment_label = payment_defaults["label"]
+                            qr_data = payment_defaults["qr_data"]
+                            st.text_input("UPI ID", value=upi_id, disabled=True)
+                            st.text_input("Bank Name", value=bank_name, disabled=True)
+                            st.text_input("Account No", value=account_no, disabled=True)
+                            st.text_input("IFSC", value=ifsc, disabled=True)
+                            st.text_input("Payment Note", value=payment_note, disabled=True)
+                            st.text_input("Payment Label", value=payment_label, disabled=True)
+                            st.text_input("QR Data (optional)", value=qr_data, disabled=True)
+
+                    if not qr_data and upi_id:
+                        encoded_name = quote(company_name) if company_name else "Payee"
+                        qr_data = f"upi://pay?pa={upi_id}&pn={encoded_name}"
 
                     pdf_bytes = utils.generate_invoice_pdf(
                         selected_row,
@@ -370,6 +481,17 @@ def render() -> None:
                             "signature_bytes": signature_bytes,
                             "brand_color": brand_color,
                             "terms": terms,
+                            "font_bytes": font_bytes,
+                            "watermark_text": watermark_text,
+                            "qr_data": qr_data,
+                            "payment_details": {
+                                "upi_id": upi_id,
+                                "bank_name": bank_name,
+                                "account_no": account_no,
+                                "ifsc": ifsc,
+                                "note": payment_note,
+                                "label": payment_label,
+                            },
                         },
                     )
                     filename_base = re.sub(r"[^A-Za-z0-9_-]+", "_", label)

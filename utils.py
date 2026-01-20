@@ -6,6 +6,8 @@ from typing import Iterable
 import base64
 import binascii
 import io
+import os
+import tempfile
 import textwrap
 
 import pandas as pd
@@ -206,6 +208,33 @@ def decode_base64_data(value: str | None) -> bytes | None:
         return None
 
 
+def register_ttf_font(font_bytes: bytes | None, font_name: str = "InvoiceFont") -> str | None:
+    if not font_bytes:
+        return None
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+    except Exception:
+        return None
+    if font_name in pdfmetrics.getRegisteredFontNames():
+        return font_name
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ttf") as tmp_file:
+            tmp_file.write(font_bytes)
+            tmp_path = tmp_file.name
+        pdfmetrics.registerFont(TTFont(font_name, tmp_path))
+        return font_name
+    except Exception:
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
 def generate_invoice_pdf(
     sale_row: pd.Series,
     customer_row: pd.Series,
@@ -215,6 +244,9 @@ def generate_invoice_pdf(
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib.colors import HexColor
+    from reportlab.graphics import renderPDF
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
 
@@ -237,6 +269,21 @@ def generate_invoice_pdf(
     logo_bytes = branding.get("logo_bytes")
     signature_bytes = branding.get("signature_bytes")
     terms = str(branding.get("terms", "")).strip()
+    font_bytes = branding.get("font_bytes")
+    terms_font_name = register_ttf_font(font_bytes) or "Helvetica"
+    watermark_text = str(branding.get("watermark_text", "")).strip() or company_name
+    payment_details = branding.get("payment_details") or {}
+    qr_data = str(branding.get("qr_data", "")).strip()
+    payment_label = str(payment_details.get("label", "")).strip() or "Payment Details"
+
+    if watermark_text:
+        pdf.saveState()
+        pdf.setFillColor(HexColor("#EEEEEE"))
+        pdf.setFont("Helvetica-Bold", 60)
+        pdf.translate(width / 2, height / 2)
+        pdf.rotate(35)
+        pdf.drawCentredString(0, 0, watermark_text)
+        pdf.restoreState()
 
     if logo_bytes:
         try:
@@ -259,16 +306,17 @@ def generate_invoice_pdf(
         except Exception:
             pass
 
-    pdf.setStrokeColor(HexColor(brand_color))
-    pdf.setLineWidth(2)
-    pdf.line(20 * mm, height - 30 * mm, width - 20 * mm, height - 30 * mm)
-
+    header_height = 18 * mm
     pdf.setFillColor(HexColor(brand_color))
-    pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(20 * mm, height - 20 * mm, company_name)
+    pdf.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
+    pdf.setFillColor(HexColor("#FFFFFF"))
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(20 * mm, height - 12 * mm, company_name)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawRightString(width - 20 * mm, height - 12 * mm, "INVOICE")
     pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
-    y = height - 26 * mm
+    y = height - 32 * mm
     if company_address:
         pdf.drawString(20 * mm, y, company_address)
         y -= 4 * mm
@@ -280,26 +328,28 @@ def generate_invoice_pdf(
         y -= 4 * mm
 
     pdf.setFillColor(HexColor(brand_color))
-    pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(20 * mm, height - 45 * mm, "Invoice")
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(20 * mm, height - 48 * mm, "Invoice Details")
     pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, height - 52 * mm, f"Invoice No: {invoice_no}")
-    pdf.drawString(20 * mm, height - 57 * mm, f"Date: {invoice_date}")
+    pdf.drawString(20 * mm, height - 54 * mm, f"Invoice No: {invoice_no}")
+    pdf.drawString(20 * mm, height - 59 * mm, f"Date: {invoice_date}")
 
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
     customer_contact = str(customer_row.get("Contact", "")).strip()
+    pdf.setFillColor(HexColor(brand_color))
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, height - 70 * mm, "Bill To:")
+    pdf.drawString(20 * mm, height - 72 * mm, "Bill To:")
+    pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, height - 75 * mm, customer_name)
+    pdf.drawString(20 * mm, height - 77 * mm, customer_name)
     if customer_address:
-        pdf.drawString(20 * mm, height - 80 * mm, customer_address)
+        pdf.drawString(20 * mm, height - 82 * mm, customer_address)
     if customer_contact:
-        pdf.drawString(20 * mm, height - 85 * mm, f"Contact: {customer_contact}")
+        pdf.drawString(20 * mm, height - 87 * mm, f"Contact: {customer_contact}")
 
-    table_y = height - 100 * mm
+    table_y = height - 105 * mm
     pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(20 * mm, table_y, "Description")
     pdf.drawRightString(120 * mm, table_y, "Qty")
@@ -335,16 +385,64 @@ def generate_invoice_pdf(
     pdf.drawString(20 * mm, table_y - 40 * mm, "Balance Due")
     pdf.drawRightString(190 * mm, table_y - 40 * mm, f"{due:,.2f}")
 
-    pdf.setFont("Helvetica", 8)
-    pdf.drawString(20 * mm, 20 * mm, "Thank you for your business.")
-
+    footer_y = 18 * mm
+    reserved_bottom = footer_y + (40 * mm if (qr_data or payment_details) else 10 * mm)
+    terms_start = table_y - 50 * mm
     if terms:
-        pdf.setFont("Helvetica", 7)
-        text = pdf.beginText(20 * mm, 30 * mm)
+        pdf.setFont(terms_font_name, 7)
+        text = pdf.beginText(20 * mm, terms_start)
         text.textLine("Terms:")
         for line in textwrap.wrap(terms, width=100):
+            if text.getY() < reserved_bottom:
+                text.textLine("...")
+                break
             text.textLine(line)
         pdf.drawText(text)
+
+    if qr_data:
+        try:
+            qr_size = 28 * mm
+            qr_widget = QrCodeWidget(qr_data)
+            bounds = qr_widget.getBounds()
+            qr_width = bounds[2] - bounds[0]
+            qr_height = bounds[3] - bounds[1]
+            drawing = Drawing(qr_size, qr_size)
+            drawing.add(
+                qr_widget,
+                transform=[
+                    qr_size / qr_width,
+                    0,
+                    0,
+                    qr_size / qr_height,
+                    0,
+                    0,
+                ],
+            )
+            qr_x = width - 20 * mm - qr_size
+            qr_y = footer_y + 10 * mm
+            renderPDF.draw(drawing, pdf, qr_x, qr_y)
+        except Exception:
+            pass
+
+    if payment_details:
+        pdf.setFont("Helvetica-Bold", 8)
+        pdf.drawString(20 * mm, reserved_bottom + 8 * mm, payment_label)
+        pdf.setFont("Helvetica", 8)
+        lines = []
+        if payment_details.get("upi_id"):
+            lines.append(f"UPI: {payment_details.get('upi_id')}")
+        if payment_details.get("bank_name"):
+            lines.append(f"Bank: {payment_details.get('bank_name')}")
+        if payment_details.get("account_no"):
+            lines.append(f"A/C: {payment_details.get('account_no')}")
+        if payment_details.get("ifsc"):
+            lines.append(f"IFSC: {payment_details.get('ifsc')}")
+        if payment_details.get("note"):
+            lines.append(str(payment_details.get("note")))
+        y = reserved_bottom + 4 * mm
+        for line in lines[:5]:
+            pdf.drawString(20 * mm, y, line)
+            y -= 4 * mm
 
     if signature_bytes:
         try:
@@ -368,6 +466,9 @@ def generate_invoice_pdf(
             pdf.drawString(width - 60 * mm, 20 * mm, "Authorized Signatory")
         except Exception:
             pass
+
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(20 * mm, footer_y, "Thank you for your business.")
 
     pdf.showPage()
     pdf.save()

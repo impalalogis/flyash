@@ -167,6 +167,15 @@ company_gst = "GSTIN"
 brand_color = "#1F4E79"
 logo_base64 = "BASE64_STRING"
 signature_base64 = "BASE64_STRING"
+font_ttf_base64 = "BASE64_STRING"
+watermark_text = "Fly-Ash Brick Unit"
+upi_id = "your@upi"
+bank_name = "Bank Name"
+account_no = "1234567890"
+ifsc = "IFSC0000"
+payment_label = "Payment Details"
+payment_note = "Pay within 7 days."
+qr_data = ""
 terms = "Goods once sold will not be taken back."
 ```
 
@@ -175,6 +184,15 @@ To get base64:
 python - <<'PY'
 import base64
 with open("logo.png", "rb") as f:
+    print(base64.b64encode(f.read()).decode())
+PY
+```
+
+For Hindi/Unicode text, use a font such as **NotoSansDevanagari.ttf**:
+```
+python - <<'PY'
+import base64
+with open("NotoSansDevanagari-Regular.ttf", "rb") as f:
     print(base64.b64encode(f.read()).decode())
 PY
 ```
