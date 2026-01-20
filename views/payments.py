@@ -115,3 +115,121 @@ def render() -> None:
         payments_df = payments_df[payments_df["Customer_ID"] == customer_id]
 
     st.dataframe(payments_df, use_container_width=True)
+
+    st.subheader("Payment Records")
+    entries = database.read_table("Payments")
+    if entries.empty:
+        st.info("No payment records yet.")
+        return
+    if "Payment_ID" not in entries.columns:
+        st.error("Missing Payment_ID column in Payments.")
+        return
+
+    display_entries = entries.copy()
+    display_entries["Delete"] = False
+    display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
+    edited = st.data_editor(
+        display_entries,
+        use_container_width=True,
+        disabled=[col for col in display_entries.columns if col != "Delete"],
+        key="payments_entries",
+    )
+
+    if st.button("Delete selected", key="payments_delete"):
+        selected = edited.loc[edited["Delete"] == True, "Payment_ID"].dropna().astype(str).tolist()
+        if not selected:
+            st.warning("Select at least one entry to delete.")
+        else:
+            customers_df = database.read_table("Customers")
+            outstanding_map = (
+                customers_df.set_index("Customer_ID")["Outstanding_Balance"].apply(utils.safe_float)
+                if not customers_df.empty and "Customer_ID" in customers_df.columns
+                else pd.Series(dtype=float)
+            ).to_dict()
+            for payment_id in selected:
+                row = entries.loc[entries["Payment_ID"] == payment_id]
+                if row.empty:
+                    continue
+                row = row.iloc[0]
+                customer_id = str(row.get("Customer_ID", "")).strip()
+                amount = utils.safe_float(row.get("Amount_Paid", 0))
+                if customer_id:
+                    outstanding_map[customer_id] = outstanding_map.get(customer_id, 0.0) + amount
+                    database.update_row(
+                        "Customers",
+                        customer_id,
+                        {"Outstanding_Balance": outstanding_map[customer_id]},
+                    )
+                database.delete_row("Payments", payment_id)
+            st.success("Selected entries deleted.")
+            st.rerun()
+
+    st.subheader("Validation")
+    rules = {
+        "Date": {"required": True},
+        "Customer_ID": {"required": True},
+        "Invoice_No": {"required": True},
+        "Amount_Paid": {"numeric": True, "min": 0},
+    }
+    mask, errors = utils.build_validation_mask(entries, rules)
+    if mask.any().any():
+        st.caption("Rows highlighted in red need correction.")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        invalid_rows = entries[mask.any(axis=1)].copy()
+        edited_invalid = st.data_editor(
+            invalid_rows,
+            use_container_width=True,
+            disabled=["Payment_ID"],
+            key="payments_invalid_editor",
+        )
+        if st.button("Save Corrections", key="payments_save_corrections"):
+            customers_df = database.read_table("Customers")
+            outstanding_map = (
+                customers_df.set_index("Customer_ID")["Outstanding_Balance"].apply(utils.safe_float)
+                if not customers_df.empty and "Customer_ID" in customers_df.columns
+                else pd.Series(dtype=float)
+            ).to_dict()
+            for _, row in edited_invalid.iterrows():
+                row_id = str(row.get("Payment_ID", "")).strip()
+                if not row_id:
+                    continue
+                original = entries.loc[entries["Payment_ID"] == row_id]
+                if original.empty:
+                    continue
+                original = original.iloc[0]
+                old_customer = str(original.get("Customer_ID", "")).strip()
+                new_customer = str(row.get("Customer_ID", "")).strip()
+                old_amount = utils.safe_float(original.get("Amount_Paid", 0))
+                new_amount = utils.safe_float(row.get("Amount_Paid", 0))
+
+                database.update_row("Payments", row_id, row.to_dict())
+
+                if old_customer == new_customer:
+                    diff = old_amount - new_amount
+                    if abs(diff) > 0.01 and old_customer:
+                        outstanding_map[old_customer] = outstanding_map.get(old_customer, 0.0) + diff
+                        database.update_row(
+                            "Customers",
+                            old_customer,
+                            {"Outstanding_Balance": outstanding_map[old_customer]},
+                        )
+                else:
+                    if old_customer:
+                        outstanding_map[old_customer] = outstanding_map.get(old_customer, 0.0) + old_amount
+                        database.update_row(
+                            "Customers",
+                            old_customer,
+                            {"Outstanding_Balance": outstanding_map[old_customer]},
+                        )
+                    if new_customer:
+                        outstanding_map[new_customer] = outstanding_map.get(new_customer, 0.0) - new_amount
+                        database.update_row(
+                            "Customers",
+                            new_customer,
+                            {"Outstanding_Balance": outstanding_map[new_customer]},
+                        )
+
+            st.success("Corrections saved.")
+            st.rerun()
+    else:
+        st.success("No validation issues found.")

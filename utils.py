@@ -84,6 +84,53 @@ def ensure_ids(data_frame: pd.DataFrame, id_column: str, prefix: str, generator)
     return data_frame
 
 
+def build_validation_mask(
+    data_frame: pd.DataFrame,
+    rules: dict[str, dict],
+) -> tuple[pd.DataFrame, list[str]]:
+    mask = pd.DataFrame(False, index=data_frame.index, columns=data_frame.columns)
+    errors: list[str] = []
+    for column, rule in rules.items():
+        if column not in data_frame.columns:
+            continue
+        series = data_frame[column]
+        col_mask = pd.Series(False, index=data_frame.index)
+        if rule.get("required"):
+            col_mask |= series.astype(str).str.strip() == ""
+        if rule.get("numeric"):
+            numeric = pd.to_numeric(series, errors="coerce")
+            col_mask |= numeric.isna()
+            if "min" in rule:
+                col_mask |= numeric < rule["min"]
+        if col_mask.any():
+            errors.append(f"{column}: {int(col_mask.sum())} issue(s)")
+        mask[column] = mask[column] | col_mask
+    return mask, errors
+
+
+def apply_invalid_mask(
+    mask: pd.DataFrame,
+    column: str,
+    invalid_series: pd.Series,
+) -> pd.DataFrame:
+    if column not in mask.columns:
+        mask[column] = False
+    mask.loc[invalid_series.index, column] = mask.loc[invalid_series.index, column] | invalid_series
+    return mask
+
+
+def style_invalid(data_frame: pd.DataFrame, mask: pd.DataFrame) -> pd.io.formats.style.Styler:
+    mask = mask.reindex(index=data_frame.index, columns=data_frame.columns, fill_value=False)
+
+    def _style_row(row: pd.Series) -> list[str]:
+        return [
+            "background-color: #ffcccc" if mask.loc[row.name, column] else ""
+            for column in data_frame.columns
+        ]
+
+    return data_frame.style.apply(_style_row, axis=1)
+
+
 def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.DataFrame:
     columns = ["Date", "Month", "Material", "Opening", "Inward", "Consumed", "Closing"]
     if raw_df.empty and production_df.empty:
