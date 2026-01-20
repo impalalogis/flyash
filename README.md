@@ -154,6 +154,31 @@ from the JSON key (the `client_email` field).
 3. Ensure the `gsheets` block includes `spreadsheet_id` or `spreadsheet_url`.
 4. Re-deploy the app after saving secrets.
 
+## Invoice branding (one-time setup)
+You can set invoice branding in Streamlit secrets so users don't re-upload it.
+Add this block under secrets:
+
+```
+[invoice]
+company_name = "Fly-Ash Brick Unit"
+company_address = "Your address"
+company_contact = "99999 99999"
+company_gst = "GSTIN"
+brand_color = "#1F4E79"
+logo_base64 = "BASE64_STRING"
+signature_base64 = "BASE64_STRING"
+terms = "Goods once sold will not be taken back."
+```
+
+To get base64:
+```
+python - <<'PY'
+import base64
+with open("logo.png", "rb") as f:
+    print(base64.b64encode(f.read()).decode())
+PY
+```
+
 ## Run the app
 1. Install dependencies:
    - `pip install -r requirements.txt`

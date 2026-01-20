@@ -3,6 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime
 import re
 from typing import Iterable
+import base64
+import binascii
+import io
+import textwrap
 
 import pandas as pd
 
@@ -188,6 +192,187 @@ def style_invalid(data_frame: pd.DataFrame, mask: pd.DataFrame) -> pd.io.formats
         ]
 
     return data_frame.style.apply(_style_row, axis=1)
+
+
+def decode_base64_data(value: str | None) -> bytes | None:
+    if not value:
+        return None
+    data = str(value).strip()
+    if data.startswith("data:") and "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        return base64.b64decode(data)
+    except (ValueError, binascii.Error, TypeError):
+        return None
+
+
+def generate_invoice_pdf(
+    sale_row: pd.Series,
+    customer_row: pd.Series,
+    company_info: dict[str, str],
+    branding: dict[str, object] | None = None,
+) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    company_name = company_info.get("name", "Fly-Ash Brick Unit")
+    company_address = company_info.get("address", "")
+    company_contact = company_info.get("contact", "")
+    company_gst = company_info.get("gst", "")
+
+    invoice_no = str(sale_row.get("Invoice_No", "")).strip() or str(
+        sale_row.get("Sales_ID", "")
+    ).strip()
+    invoice_date = str(sale_row.get("Date", "")).strip()
+
+    branding = branding or {}
+    brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
+    logo_bytes = branding.get("logo_bytes")
+    signature_bytes = branding.get("signature_bytes")
+    terms = str(branding.get("terms", "")).strip()
+
+    if logo_bytes:
+        try:
+            logo_reader = ImageReader(io.BytesIO(logo_bytes))
+            logo_width, logo_height = logo_reader.getSize()
+            max_width = 40 * mm
+            max_height = 20 * mm
+            scale = min(max_width / logo_width, max_height / logo_height)
+            render_width = logo_width * scale
+            render_height = logo_height * scale
+            pdf.drawImage(
+                logo_reader,
+                width - 20 * mm - render_width,
+                height - 25 * mm,
+                render_width,
+                render_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+        except Exception:
+            pass
+
+    pdf.setStrokeColor(HexColor(brand_color))
+    pdf.setLineWidth(2)
+    pdf.line(20 * mm, height - 30 * mm, width - 20 * mm, height - 30 * mm)
+
+    pdf.setFillColor(HexColor(brand_color))
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(20 * mm, height - 20 * mm, company_name)
+    pdf.setFillColor(HexColor("#000000"))
+    pdf.setFont("Helvetica", 9)
+    y = height - 26 * mm
+    if company_address:
+        pdf.drawString(20 * mm, y, company_address)
+        y -= 4 * mm
+    if company_contact:
+        pdf.drawString(20 * mm, y, f"Contact: {company_contact}")
+        y -= 4 * mm
+    if company_gst:
+        pdf.drawString(20 * mm, y, f"GST: {company_gst}")
+        y -= 4 * mm
+
+    pdf.setFillColor(HexColor(brand_color))
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(20 * mm, height - 45 * mm, "Invoice")
+    pdf.setFillColor(HexColor("#000000"))
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, height - 52 * mm, f"Invoice No: {invoice_no}")
+    pdf.drawString(20 * mm, height - 57 * mm, f"Date: {invoice_date}")
+
+    customer_name = str(customer_row.get("Name", "")).strip()
+    customer_address = str(customer_row.get("Address", "")).strip()
+    customer_contact = str(customer_row.get("Contact", "")).strip()
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, height - 70 * mm, "Bill To:")
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, height - 75 * mm, customer_name)
+    if customer_address:
+        pdf.drawString(20 * mm, height - 80 * mm, customer_address)
+    if customer_contact:
+        pdf.drawString(20 * mm, height - 85 * mm, f"Contact: {customer_contact}")
+
+    table_y = height - 100 * mm
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, table_y, "Description")
+    pdf.drawRightString(120 * mm, table_y, "Qty")
+    pdf.drawRightString(150 * mm, table_y, "Rate")
+    pdf.drawRightString(190 * mm, table_y, "Amount")
+
+    qty = safe_float(sale_row.get("No_of_Bricks", 0))
+    rate = safe_float(sale_row.get("Rate", 0))
+    amount = safe_float(sale_row.get("Amount", qty * rate))
+    freight = safe_float(sale_row.get("Freight", 0))
+    total = safe_float(sale_row.get("Total_Amount", amount + freight))
+    received = safe_float(sale_row.get("Amount_Received", 0))
+    due = safe_float(sale_row.get("Due", total - received))
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, table_y - 6 * mm, "Fly-ash bricks")
+    pdf.drawRightString(120 * mm, table_y - 6 * mm, f"{qty:,.0f}")
+    pdf.drawRightString(150 * mm, table_y - 6 * mm, f"{rate:,.2f}")
+    pdf.drawRightString(190 * mm, table_y - 6 * mm, f"{amount:,.2f}")
+
+    pdf.drawString(20 * mm, table_y - 14 * mm, "Freight")
+    pdf.drawRightString(190 * mm, table_y - 14 * mm, f"{freight:,.2f}")
+
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, table_y - 24 * mm, "Total")
+    pdf.drawRightString(190 * mm, table_y - 24 * mm, f"{total:,.2f}")
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, table_y - 32 * mm, "Amount Received")
+    pdf.drawRightString(190 * mm, table_y - 32 * mm, f"{received:,.2f}")
+
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, table_y - 40 * mm, "Balance Due")
+    pdf.drawRightString(190 * mm, table_y - 40 * mm, f"{due:,.2f}")
+
+    pdf.setFont("Helvetica", 8)
+    pdf.drawString(20 * mm, 20 * mm, "Thank you for your business.")
+
+    if terms:
+        pdf.setFont("Helvetica", 7)
+        text = pdf.beginText(20 * mm, 30 * mm)
+        text.textLine("Terms:")
+        for line in textwrap.wrap(terms, width=100):
+            text.textLine(line)
+        pdf.drawText(text)
+
+    if signature_bytes:
+        try:
+            sig_reader = ImageReader(io.BytesIO(signature_bytes))
+            sig_width, sig_height = sig_reader.getSize()
+            max_width = 40 * mm
+            max_height = 15 * mm
+            scale = min(max_width / sig_width, max_height / sig_height)
+            render_width = sig_width * scale
+            render_height = sig_height * scale
+            pdf.drawImage(
+                sig_reader,
+                width - 60 * mm,
+                25 * mm,
+                render_width,
+                render_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            pdf.setFont("Helvetica", 8)
+            pdf.drawString(width - 60 * mm, 20 * mm, "Authorized Signatory")
+        except Exception:
+            pass
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.read()
 
 
 def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.DataFrame:
