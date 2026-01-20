@@ -176,6 +176,78 @@ def render() -> None:
             st.warning("Select at least one entry to delete.")
         else:
             for rm_id in selected:
-                database.delete_row("Raw_Material_Log", rm_id)
+                database.delete_row("Raw_Material_Log", rm_id, recompute_stock=False)
+            database.update_stock_log()
             st.success("Selected entries deleted.")
             st.rerun()
+
+    st.subheader("Validation")
+    rules = {
+        "Date": {"required": True},
+        "Supplier_ID": {"required": True},
+        "Material": {"required": True},
+        "Qty": {"numeric": True, "min": 0},
+        "Rate": {"numeric": True, "min": 0},
+        "GST": {"numeric": True, "min": 0},
+        "Route_Expenses": {"numeric": True, "min": 0},
+        "Diesel": {"numeric": True, "min": 0},
+        "Driver_Salary": {"numeric": True, "min": 0},
+        "Vehicle_Charge": {"numeric": True, "min": 0},
+        "Freight": {"numeric": True, "min": 0},
+        "Amount_Paid": {"numeric": True, "min": 0},
+        "Material_Rate": {"numeric": True, "min": 0},
+        "Total_Cost": {"numeric": True, "min": 0},
+    }
+    mask, errors = utils.build_validation_mask(entries, rules)
+    qty = pd.to_numeric(entries.get("Qty", pd.Series(dtype=float)), errors="coerce")
+    rate = pd.to_numeric(entries.get("Rate", pd.Series(dtype=float)), errors="coerce")
+    gst = pd.to_numeric(entries.get("GST", pd.Series(dtype=float)), errors="coerce")
+    route = pd.to_numeric(entries.get("Route_Expenses", pd.Series(dtype=float)), errors="coerce")
+    diesel = pd.to_numeric(entries.get("Diesel", pd.Series(dtype=float)), errors="coerce")
+    driver = pd.to_numeric(entries.get("Driver_Salary", pd.Series(dtype=float)), errors="coerce")
+    vehicle = pd.to_numeric(entries.get("Vehicle_Charge", pd.Series(dtype=float)), errors="coerce")
+    freight_val = pd.to_numeric(entries.get("Freight", pd.Series(dtype=float)), errors="coerce")
+    material_rate = pd.to_numeric(
+        entries.get("Material_Rate", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    total_cost = pd.to_numeric(
+        entries.get("Total_Cost", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+
+    calc_material_rate = qty * rate
+    calc_total_cost = (
+        calc_material_rate + gst + route + diesel + driver + vehicle + freight_val
+    )
+    invalid_material_rate = (material_rate - calc_material_rate).abs() > 0.01
+    invalid_total_cost = (total_cost - calc_total_cost).abs() > 0.01
+    mask = utils.apply_invalid_mask(mask, "Material_Rate", invalid_material_rate)
+    mask = utils.apply_invalid_mask(mask, "Total_Cost", invalid_total_cost)
+
+    if mask.any().any():
+        st.caption("Rows highlighted in red need correction.")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        invalid_rows = entries[mask.any(axis=1)].copy()
+        edited_invalid = st.data_editor(
+            invalid_rows,
+            use_container_width=True,
+            disabled=["RM_ID"],
+            key="raw_material_invalid_editor",
+        )
+        if st.button("Save Corrections", key="raw_material_save_corrections"):
+            for _, row in edited_invalid.iterrows():
+                row_id = str(row.get("RM_ID", "")).strip()
+                if not row_id:
+                    continue
+                database.update_row(
+                    "Raw_Material_Log",
+                    row_id,
+                    row.to_dict(),
+                    recompute_stock=False,
+                )
+            database.update_stock_log()
+            st.success("Corrections saved.")
+            st.rerun()
+    else:
+        st.success("No validation issues found.")

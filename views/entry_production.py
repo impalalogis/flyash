@@ -135,6 +135,45 @@ def render() -> None:
             st.warning("Select at least one entry to delete.")
         else:
             for prod_id in selected:
-                database.delete_row("Production_Log", prod_id)
+                database.delete_row("Production_Log", prod_id, recompute_stock=False)
+            database.update_stock_log()
             st.success("Selected entries deleted.")
             st.rerun()
+
+    st.subheader("Validation")
+    rules = {
+        "Date": {"required": True},
+        "No_of_Bricks": {"numeric": True, "min": 0},
+        "Cement_Consumption": {"numeric": True, "min": 0},
+        "FlyAsh_Consumption": {"numeric": True, "min": 0},
+        "No_of_Labour": {"numeric": True, "min": 0},
+        "Labour_Expense": {"numeric": True, "min": 0},
+        "Actual_Payment_Amount": {"numeric": True, "min": 0},
+    }
+    mask, errors = utils.build_validation_mask(entries, rules)
+    if mask.any().any():
+        st.caption("Rows highlighted in red need correction.")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        invalid_rows = entries[mask.any(axis=1)].copy()
+        edited_invalid = st.data_editor(
+            invalid_rows,
+            use_container_width=True,
+            disabled=["Prod_ID"],
+            key="production_invalid_editor",
+        )
+        if st.button("Save Corrections", key="production_save_corrections"):
+            for _, row in edited_invalid.iterrows():
+                row_id = str(row.get("Prod_ID", "")).strip()
+                if not row_id:
+                    continue
+                database.update_row(
+                    "Production_Log",
+                    row_id,
+                    row.to_dict(),
+                    recompute_stock=False,
+                )
+            database.update_stock_log()
+            st.success("Corrections saved.")
+            st.rerun()
+    else:
+        st.success("No validation issues found.")

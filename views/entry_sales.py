@@ -141,3 +141,159 @@ def render() -> None:
                 {"Outstanding_Balance": outstanding + due},
             )
             st.success("Sales entry saved and outstanding updated.")
+
+    st.subheader("Sales Records")
+    entries = database.read_table("Sales_Log")
+    if entries.empty:
+        st.info("No sales records yet.")
+        return
+    if "Sales_ID" not in entries.columns:
+        st.error("Missing Sales_ID column in Sales_Log.")
+        return
+
+    display_entries = entries.copy()
+    display_entries["Delete"] = False
+    display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
+    edited = st.data_editor(
+        display_entries,
+        use_container_width=True,
+        disabled=[col for col in display_entries.columns if col != "Delete"],
+        key="sales_entries",
+    )
+
+    if st.button("Delete selected", key="sales_delete"):
+        selected = edited.loc[edited["Delete"] == True, "Sales_ID"].dropna().astype(str).tolist()
+        if not selected:
+            st.warning("Select at least one entry to delete.")
+        else:
+            customers_df = database.read_table("Customers")
+            outstanding_map = (
+                customers_df.set_index("Customer_ID")["Outstanding_Balance"].apply(utils.safe_float)
+                if not customers_df.empty and "Customer_ID" in customers_df.columns
+                else pd.Series(dtype=float)
+            ).to_dict()
+            for sales_id in selected:
+                row = entries.loc[entries["Sales_ID"] == sales_id]
+                if row.empty:
+                    continue
+                row = row.iloc[0]
+                customer_id = str(row.get("Customer_ID", "")).strip()
+                due = utils.safe_float(row.get("Due", 0))
+                if customer_id:
+                    outstanding_map[customer_id] = outstanding_map.get(customer_id, 0.0) - due
+                    database.update_row(
+                        "Customers",
+                        customer_id,
+                        {"Outstanding_Balance": outstanding_map[customer_id]},
+                    )
+                database.delete_row("Sales_Log", sales_id)
+            st.success("Selected entries deleted.")
+            st.rerun()
+
+    st.subheader("Validation")
+    rules = {
+        "Date": {"required": True},
+        "Customer_ID": {"required": True},
+        "Invoice_No": {"required": True},
+        "No_of_Bricks": {"numeric": True, "min": 0},
+        "Rate": {"numeric": True, "min": 0},
+        "Amount": {"numeric": True, "min": 0},
+        "Freight": {"numeric": True, "min": 0},
+        "Total_Amount": {"numeric": True, "min": 0},
+        "Amount_Received": {"numeric": True, "min": 0},
+        "Due": {"numeric": True},
+    }
+    mask, errors = utils.build_validation_mask(entries, rules)
+    bricks = pd.to_numeric(entries.get("No_of_Bricks", pd.Series(dtype=float)), errors="coerce")
+    rate_val = pd.to_numeric(entries.get("Rate", pd.Series(dtype=float)), errors="coerce")
+    amount = pd.to_numeric(entries.get("Amount", pd.Series(dtype=float)), errors="coerce")
+    freight = pd.to_numeric(entries.get("Freight", pd.Series(dtype=float)), errors="coerce")
+    total_amount = pd.to_numeric(
+        entries.get("Total_Amount", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    received = pd.to_numeric(
+        entries.get("Amount_Received", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    due = pd.to_numeric(entries.get("Due", pd.Series(dtype=float)), errors="coerce")
+    calc_amount = bricks * rate_val
+    calc_total = calc_amount + freight
+    calc_due = calc_total - received
+    mask = utils.apply_invalid_mask(mask, "Amount", (amount - calc_amount).abs() > 0.01)
+    mask = utils.apply_invalid_mask(mask, "Total_Amount", (total_amount - calc_total).abs() > 0.01)
+    mask = utils.apply_invalid_mask(mask, "Due", (due - calc_due).abs() > 0.01)
+
+    if mask.any().any():
+        st.caption("Rows highlighted in red need correction. Calculated fields will be refreshed.")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        invalid_rows = entries[mask.any(axis=1)].copy()
+        edited_invalid = st.data_editor(
+            invalid_rows,
+            use_container_width=True,
+            disabled=["Sales_ID"],
+            key="sales_invalid_editor",
+        )
+        if st.button("Save Corrections", key="sales_save_corrections"):
+            customers_df = database.read_table("Customers")
+            outstanding_map = (
+                customers_df.set_index("Customer_ID")["Outstanding_Balance"].apply(utils.safe_float)
+                if not customers_df.empty and "Customer_ID" in customers_df.columns
+                else pd.Series(dtype=float)
+            ).to_dict()
+            for _, row in edited_invalid.iterrows():
+                row_id = str(row.get("Sales_ID", "")).strip()
+                if not row_id:
+                    continue
+                original = entries.loc[entries["Sales_ID"] == row_id]
+                if original.empty:
+                    continue
+                original = original.iloc[0]
+                old_customer = str(original.get("Customer_ID", "")).strip()
+                old_due = utils.safe_float(original.get("Due", 0))
+
+                new_customer = str(row.get("Customer_ID", "")).strip()
+                bricks_val = utils.safe_float(row.get("No_of_Bricks", 0))
+                rate_new = utils.safe_float(row.get("Rate", 0))
+                freight_new = utils.safe_float(row.get("Freight", 0))
+                received_new = utils.safe_float(row.get("Amount_Received", 0))
+                amount_new = bricks_val * rate_new
+                total_new = amount_new + freight_new
+                due_new = total_new - received_new
+
+                data = row.to_dict()
+                data["Amount"] = amount_new
+                data["Total_Amount"] = total_new
+                data["Due"] = due_new
+
+                database.update_row("Sales_Log", row_id, data)
+
+                if old_customer == new_customer:
+                    diff = due_new - old_due
+                    if abs(diff) > 0.01 and old_customer:
+                        outstanding_map[old_customer] = outstanding_map.get(old_customer, 0.0) + diff
+                        database.update_row(
+                            "Customers",
+                            old_customer,
+                            {"Outstanding_Balance": outstanding_map[old_customer]},
+                        )
+                else:
+                    if old_customer:
+                        outstanding_map[old_customer] = outstanding_map.get(old_customer, 0.0) - old_due
+                        database.update_row(
+                            "Customers",
+                            old_customer,
+                            {"Outstanding_Balance": outstanding_map[old_customer]},
+                        )
+                    if new_customer:
+                        outstanding_map[new_customer] = outstanding_map.get(new_customer, 0.0) + due_new
+                        database.update_row(
+                            "Customers",
+                            new_customer,
+                            {"Outstanding_Balance": outstanding_map[new_customer]},
+                        )
+
+            st.success("Corrections saved.")
+            st.rerun()
+    else:
+        st.success("No validation issues found.")
