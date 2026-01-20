@@ -14,14 +14,18 @@ def _parse_dates(data_frame: pd.DataFrame, column: str) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
     data_frame = data_frame.copy()
-    data_frame[column] = pd.to_datetime(data_frame[column], errors="coerce").dt.date
+    data_frame[column] = pd.to_datetime(
+        data_frame[column],
+        errors="coerce",
+        dayfirst=True,
+    ).dt.date
     return data_frame
 
 
 def _filter_by_date(data_frame: pd.DataFrame, column: str, start: date, end: date) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
-    series = pd.to_datetime(data_frame[column], errors="coerce")
+    series = pd.to_datetime(data_frame[column], errors="coerce", dayfirst=True)
     start_ts = pd.to_datetime(start)
     end_ts = pd.to_datetime(end)
     return data_frame[(series >= start_ts) & (series <= end_ts)]
@@ -32,7 +36,7 @@ def _add_period_column(data_frame: pd.DataFrame, column: str, period: str) -> pd
         return data_frame
     freq = {"Monthly": "M", "Quarterly": "Q", "Yearly": "Y"}[period]
     data_frame = data_frame.copy()
-    dt = pd.to_datetime(data_frame[column], errors="coerce")
+    dt = pd.to_datetime(data_frame[column], errors="coerce", dayfirst=True)
     data_frame["Period"] = dt.dt.to_period(freq).astype(str)
     data_frame = data_frame[data_frame["Period"] != "NaT"]
     return data_frame
@@ -74,31 +78,25 @@ def render() -> None:
     production_filtered = _filter_by_date(production, "Date", start_date, end_date)
     sales_filtered = _filter_by_date(sales, "Date", start_date, end_date)
 
-    total_sales = pd.to_numeric(
-        sales_filtered.get("Total_Amount", pd.Series(dtype=float)),
-        errors="coerce",
-    ).sum()
-    total_raw_cost = pd.to_numeric(
-        raw_filtered.get("Total_Cost", pd.Series(dtype=float)),
-        errors="coerce",
-    ).sum()
-    total_labour = pd.to_numeric(
-        production_filtered.get("Labour_Expense", pd.Series(dtype=float)),
-        errors="coerce",
-    ).sum()
-    total_production = pd.to_numeric(
-        production_filtered.get("No_of_Bricks", pd.Series(dtype=float)),
-        errors="coerce",
-    ).sum()
+    total_sales = utils.to_numeric_series(
+        sales_filtered.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    total_raw_cost = utils.to_numeric_series(
+        raw_filtered.get("Total_Cost", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    total_labour = utils.to_numeric_series(
+        production_filtered.get("Labour_Expense", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    total_production = utils.to_numeric_series(
+        production_filtered.get("No_of_Bricks", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
     profit = total_sales - (total_raw_cost + total_labour)
-    total_sold_bricks = pd.to_numeric(
-        sales_filtered.get("No_of_Bricks", pd.Series(dtype=float)),
-        errors="coerce",
-    ).sum()
-    total_received = pd.to_numeric(
-        sales_filtered.get("Amount_Received", pd.Series(dtype=float)),
-        errors="coerce",
-    ).sum()
+    total_sold_bricks = utils.to_numeric_series(
+        sales_filtered.get("No_of_Bricks", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    total_received = utils.to_numeric_series(
+        sales_filtered.get("Amount_Received", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
 
     metric1, metric2, metric3, metric4, metric5 = st.columns(5)
     metric1.metric("Total Production", f"{total_production:,.0f}")
@@ -118,7 +116,7 @@ def render() -> None:
     metric9.metric("Collection Ratio", f"{collection_ratio:,.1f}%")
 
     production_days = (
-        production_filtered["Date"].nunique() if not production_filtered.empty else 0
+        production_filtered["Date"].dropna().nunique() if not production_filtered.empty else 0
     )
     total_capacity = production_days * daily_capacity if daily_capacity else 0
     capacity_utilization = (
@@ -136,41 +134,35 @@ def render() -> None:
         st.info("No data available for the selected range.")
     else:
         sales_period = _add_period_column(sales_filtered, "Date", period)
-        sales_period["Total_Amount"] = pd.to_numeric(
-            sales_period.get("Total_Amount", pd.Series(dtype=float)),
-            errors="coerce",
+        sales_period["Total_Amount"] = utils.to_numeric_series(
+            sales_period.get("Total_Amount", pd.Series(dtype=float))
         ).fillna(0.0)
-        sales_period["No_of_Bricks"] = pd.to_numeric(
-            sales_period.get("No_of_Bricks", pd.Series(dtype=float)),
-            errors="coerce",
+        sales_period["No_of_Bricks"] = utils.to_numeric_series(
+            sales_period.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
-        sales_period["Amount_Received"] = pd.to_numeric(
-            sales_period.get("Amount_Received", pd.Series(dtype=float)),
-            errors="coerce",
+        sales_period["Amount_Received"] = utils.to_numeric_series(
+            sales_period.get("Amount_Received", pd.Series(dtype=float))
         ).fillna(0.0)
 
         raw_period = _add_period_column(raw_filtered, "Date", period)
-        raw_period["Total_Cost"] = pd.to_numeric(
-            raw_period.get("Total_Cost", pd.Series(dtype=float)),
-            errors="coerce",
+        raw_period["Total_Cost"] = utils.to_numeric_series(
+            raw_period.get("Total_Cost", pd.Series(dtype=float))
         ).fillna(0.0)
 
         labour_period = _add_period_column(production_filtered, "Date", period)
-        labour_period["Labour_Expense"] = pd.to_numeric(
-            labour_period.get("Labour_Expense", pd.Series(dtype=float)),
-            errors="coerce",
+        labour_period["Labour_Expense"] = utils.to_numeric_series(
+            labour_period.get("Labour_Expense", pd.Series(dtype=float))
         ).fillna(0.0)
-        labour_period["No_of_Bricks"] = pd.to_numeric(
-            labour_period.get("No_of_Bricks", pd.Series(dtype=float)),
-            errors="coerce",
+        labour_period["No_of_Bricks"] = utils.to_numeric_series(
+            labour_period.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
-        labour_period["No_of_Labour"] = pd.to_numeric(
-            labour_period.get("No_of_Labour", pd.Series(dtype=float)),
-            errors="coerce",
+        labour_period["No_of_Labour"] = utils.to_numeric_series(
+            labour_period.get("No_of_Labour", pd.Series(dtype=float))
         ).fillna(0.0)
         labour_period["Date"] = pd.to_datetime(
             labour_period.get("Date", pd.Series(dtype=str)),
             errors="coerce",
+            dayfirst=True,
         ).dt.date
 
         sales_summary = (
@@ -303,17 +295,14 @@ def render() -> None:
 
         st.subheader("Material Consumption per 1000 Bricks")
         consumption_period = _add_period_column(production_filtered, "Date", period)
-        consumption_period["Cement_Consumption"] = pd.to_numeric(
-            consumption_period.get("Cement_Consumption", pd.Series(dtype=float)),
-            errors="coerce",
+        consumption_period["Cement_Consumption"] = utils.to_numeric_series(
+            consumption_period.get("Cement_Consumption", pd.Series(dtype=float))
         ).fillna(0.0)
-        consumption_period["FlyAsh_Consumption"] = pd.to_numeric(
-            consumption_period.get("FlyAsh_Consumption", pd.Series(dtype=float)),
-            errors="coerce",
+        consumption_period["FlyAsh_Consumption"] = utils.to_numeric_series(
+            consumption_period.get("FlyAsh_Consumption", pd.Series(dtype=float))
         ).fillna(0.0)
-        consumption_period["No_of_Bricks"] = pd.to_numeric(
-            consumption_period.get("No_of_Bricks", pd.Series(dtype=float)),
-            errors="coerce",
+        consumption_period["No_of_Bricks"] = utils.to_numeric_series(
+            consumption_period.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
         consumption_summary = (
             consumption_period.groupby("Period", dropna=False)[
@@ -357,9 +346,8 @@ def render() -> None:
         st.altair_chart(consumption_chart, use_container_width=True)
 
         st.subheader("Transport Cost per 1000 Bricks")
-        sales_period["Freight"] = pd.to_numeric(
-            sales_period.get("Freight", pd.Series(dtype=float)),
-            errors="coerce",
+        sales_period["Freight"] = utils.to_numeric_series(
+            sales_period.get("Freight", pd.Series(dtype=float))
         ).fillna(0.0)
         freight_summary = (
             sales_period.groupby("Period", dropna=False)[["Freight", "No_of_Bricks"]]
@@ -425,10 +413,13 @@ def render() -> None:
         st.info("No production data available.")
     else:
         efficiency = production_filtered.copy()
-        efficiency["Efficiency"] = (
-            pd.to_numeric(efficiency.get("No_of_Bricks", pd.Series(dtype=float)), errors="coerce")
-            / pd.to_numeric(efficiency.get("No_of_Labour", pd.Series(dtype=float)), errors="coerce")
+        bricks = utils.to_numeric_series(
+            efficiency.get("No_of_Bricks", pd.Series(dtype=float))
+        ).fillna(0.0)
+        labour = utils.to_numeric_series(
+            efficiency.get("No_of_Labour", pd.Series(dtype=float))
         )
+        efficiency["Efficiency"] = bricks.div(labour.replace(0, pd.NA))
         efficiency_chart = (
             alt.Chart(efficiency)
             .mark_bar()
@@ -451,9 +442,9 @@ def render() -> None:
                 "FlyAsh_Consumption": "Fly Ash",
             }
         )
-        consumption["No_of_Bricks"] = pd.to_numeric(
-            consumption.get("No_of_Bricks", pd.Series(dtype=float)), errors="coerce"
-        )
+        consumption["No_of_Bricks"] = utils.to_numeric_series(
+            consumption.get("No_of_Bricks", pd.Series(dtype=float))
+        ).fillna(0.0)
         melt = consumption.melt(
             id_vars=["Date", "No_of_Bricks"],
             value_vars=["Cement", "Fly Ash"],
@@ -491,9 +482,8 @@ def render() -> None:
             st.info("No stock data available.")
         else:
             stock_filtered = _filter_by_date(stock_log, "Date", start_date, end_date)
-            stock_filtered["Closing"] = pd.to_numeric(
-                stock_filtered.get("Closing", pd.Series(dtype=float)),
-                errors="coerce",
+            stock_filtered["Closing"] = utils.to_numeric_series(
+                stock_filtered.get("Closing", pd.Series(dtype=float))
             ).fillna(0.0)
             latest_stock = (
                 stock_filtered.sort_values("Date")
@@ -515,3 +505,51 @@ def render() -> None:
             )
         )
         st.altair_chart(stock_chart, use_container_width=True)
+
+    st.subheader("Dashboard Diagnostics")
+    with st.expander("Data quality checks", expanded=False):
+        def _quality_block(label: str, frame: pd.DataFrame, date_col: str, numeric_cols: list[str]) -> None:
+            st.markdown(f"**{label}**")
+            if frame.empty:
+                st.write("No rows.")
+                return
+            date_series = pd.to_datetime(frame.get(date_col, pd.Series(dtype=str)), errors="coerce", dayfirst=True)
+            invalid_date = date_series.isna()
+            st.write(
+                {
+                    "rows": len(frame),
+                    "invalid_dates": int(invalid_date.sum()),
+                }
+            )
+            if invalid_date.any():
+                st.dataframe(frame[invalid_date].head(5), use_container_width=True)
+            for column in numeric_cols:
+                numeric = utils.to_numeric_series(frame.get(column, pd.Series(dtype=str)))
+                invalid_num = numeric.isna()
+                st.write(
+                    {
+                        "column": column,
+                        "invalid_numbers": int(invalid_num.sum()),
+                    }
+                )
+                if invalid_num.any():
+                    st.dataframe(frame[invalid_num].head(5), use_container_width=True)
+
+        _quality_block(
+            "Production Log",
+            production,
+            "Date",
+            ["No_of_Bricks", "Labour_Expense", "No_of_Labour"],
+        )
+        _quality_block(
+            "Sales Log",
+            sales,
+            "Date",
+            ["Total_Amount", "Amount_Received", "No_of_Bricks"],
+        )
+        _quality_block(
+            "Raw Material Log",
+            raw_materials,
+            "Date",
+            ["Total_Cost", "Qty", "Rate"],
+        )

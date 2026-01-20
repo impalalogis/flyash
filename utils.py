@@ -25,6 +25,11 @@ def safe_int(value: object, default: int = 0) -> int:
         return default
 
 
+def to_numeric_series(series: pd.Series) -> pd.Series:
+    cleaned = series.astype(str).str.replace(",", "", regex=False).str.strip()
+    return pd.to_numeric(cleaned, errors="coerce")
+
+
 def to_month_string(value: date) -> str:
     return value.strftime("%Y-%m")
 
