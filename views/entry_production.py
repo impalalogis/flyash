@@ -143,11 +143,11 @@ def render() -> None:
                 prod_date,
                 payment_week_range_weeks,
             )
-            labour_payment_date = st.selectbox(
+            labour_payment_date = st.text_input(
                 "Labour Payment Date",
-                options=[payment_range_label],
-                index=0,
-                help="Payment date range based on the configured week window.",
+                value=payment_range_label,
+                disabled=True,
+                help="Auto-filled based on the configured week window.",
             )
             actual_payment_amount = st.number_input(
                 "Actual Payment Amount",
