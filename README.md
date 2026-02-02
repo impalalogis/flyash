@@ -103,6 +103,7 @@ Notes:
   For Contract, Labour_Expense = No_of_Bricks * Contract_Rate.
 - Contract rate default is configurable via `production.contract_rate`.
 - For Day basis, No_of_Labour is auto-filled from Labour_Attendance for the date.
+- Labour payment date range is configurable via `production.payment_week_range_weeks`.
 
 **Sales_Log**
 - Sales_ID
@@ -166,6 +167,7 @@ You can configure production defaults in Streamlit secrets:
 flyash_per_brick = 1.84
 stone_dust_per_brick = 1.38
 contract_rate = 0.0
+payment_week_range_weeks = 1
 ```
 
 ## Deploying on Streamlit Cloud

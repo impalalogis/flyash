@@ -27,6 +27,7 @@ PRODUCTION_COLUMNS = [
 
 DEFAULT_STONE_DUST_PER_BRICK = 1.38
 DEFAULT_FLYASH_PER_BRICK = 1.84
+DEFAULT_PAYMENT_WEEK_RANGE = 1
 
 
 def _get_production_config() -> dict[str, float]:
@@ -46,10 +47,17 @@ def _get_production_config() -> dict[str, float]:
     contract_rate = utils.safe_float(config.get("contract_rate"), default=0.0)
     if contract_rate < 0:
         contract_rate = 0.0
+    payment_week_range = utils.safe_int(
+        config.get("payment_week_range_weeks"),
+        default=DEFAULT_PAYMENT_WEEK_RANGE,
+    )
+    if payment_week_range < 0:
+        payment_week_range = DEFAULT_PAYMENT_WEEK_RANGE
     return {
         "flyash_per_brick": flyash_per_brick,
         "stone_dust_per_brick": stone_dust_per_brick,
         "contract_rate": contract_rate,
+        "payment_week_range_weeks": payment_week_range,
     }
 
 
@@ -74,6 +82,7 @@ def render() -> None:
     flyash_per_brick = production_config["flyash_per_brick"]
     stone_dust_per_brick = production_config["stone_dust_per_brick"]
     contract_rate_default = production_config["contract_rate"]
+    payment_week_range_weeks = int(production_config["payment_week_range_weeks"])
 
     labour_df = database.read_table("Labour")
     avg_wage = utils.average_daily_wage(labour_df)
@@ -131,13 +140,20 @@ def render() -> None:
             if labour_basis != "Contract":
                 contract_rate = 0.0
             week_start = prod_date - timedelta(days=prod_date.weekday())
-            week_end = week_start + timedelta(days=6)
-            labour_payment_date = st.date_input(
+            last_week_monday = week_start - timedelta(weeks=payment_week_range_weeks)
+            next_week_sunday = week_start + timedelta(days=6, weeks=payment_week_range_weeks)
+            payment_dates = [
+                last_week_monday + timedelta(days=offset)
+                for offset in range((next_week_sunday - last_week_monday).days + 1)
+            ]
+            labour_payment_date = st.selectbox(
                 "Labour Payment Date",
-                value=prod_date,
-                min_value=week_start,
-                max_value=week_end,
-                help=f"Select a date between {week_start} and {week_end}.",
+                options=payment_dates,
+                index=payment_dates.index(prod_date),
+                format_func=lambda value: value.isoformat(),
+                help=(
+                    "Select a date between last week's Monday and next week's Sunday."
+                ),
             )
             actual_payment_amount = st.number_input(
                 "Actual Payment Amount",
