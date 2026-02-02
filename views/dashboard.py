@@ -213,7 +213,7 @@ def render() -> None:
         )
         st.altair_chart(
             alt.layer(sales_line, production_bar).resolve_scale(y="independent"),
-            use_container_width=True,
+            width="stretch",
         )
 
         st.subheader("Cost Breakdown")
@@ -233,7 +233,7 @@ def render() -> None:
                 tooltip=["Period", "Cost_Type", "Amount"],
             )
         )
-        st.altair_chart(cost_chart, use_container_width=True)
+        st.altair_chart(cost_chart, width="stretch")
 
         st.subheader("Average Selling Price Trend")
         avg_price_chart = (
@@ -245,7 +245,7 @@ def render() -> None:
                 tooltip=["Period", "Avg_Price"],
             )
         )
-        st.altair_chart(avg_price_chart, use_container_width=True)
+        st.altair_chart(avg_price_chart, width="stretch")
 
         st.subheader("Collection Performance")
         collection_summary = (
@@ -270,7 +270,7 @@ def render() -> None:
                 tooltip=["Period", "Metric", "Amount"],
             )
         )
-        st.altair_chart(collection_chart, use_container_width=True)
+        st.altair_chart(collection_chart, width="stretch")
 
         st.subheader("Labour Productivity")
         productivity = (
@@ -291,7 +291,7 @@ def render() -> None:
                 tooltip=["Period", "Bricks_per_Labour"],
             )
         )
-        st.altair_chart(productivity_chart, use_container_width=True)
+        st.altair_chart(productivity_chart, width="stretch")
 
         st.subheader("Material Consumption per 1000 Bricks")
         consumption_period = _add_period_column(production_filtered, "Date", period)
@@ -301,12 +301,15 @@ def render() -> None:
         consumption_period["FlyAsh_Consumption"] = utils.to_numeric_series(
             consumption_period.get("FlyAsh_Consumption", pd.Series(dtype=float))
         ).fillna(0.0)
+        consumption_period["StoneDust_Consumption"] = utils.to_numeric_series(
+            consumption_period.get("StoneDust_Consumption", pd.Series(dtype=float))
+        ).fillna(0.0)
         consumption_period["No_of_Bricks"] = utils.to_numeric_series(
             consumption_period.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
         consumption_summary = (
             consumption_period.groupby("Period", dropna=False)[
-                ["Cement_Consumption", "FlyAsh_Consumption", "No_of_Bricks"]
+                ["Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption", "No_of_Bricks"]
             ]
             .sum()
             .reset_index()
@@ -327,9 +330,17 @@ def render() -> None:
             ),
             axis=1,
         )
+        consumption_summary["StoneDust_per_1000"] = consumption_summary.apply(
+            lambda row: (
+                row["StoneDust_Consumption"] / row["No_of_Bricks"] * 1000
+                if row["No_of_Bricks"]
+                else 0.0
+            ),
+            axis=1,
+        )
         consumption_melt = consumption_summary.melt(
             id_vars=["Period"],
-            value_vars=["Cement_per_1000", "FlyAsh_per_1000"],
+            value_vars=["Cement_per_1000", "FlyAsh_per_1000", "StoneDust_per_1000"],
             var_name="Material",
             value_name="Per_1000",
         )
@@ -343,7 +354,7 @@ def render() -> None:
                 tooltip=["Period", "Material", "Per_1000"],
             )
         )
-        st.altair_chart(consumption_chart, use_container_width=True)
+        st.altair_chart(consumption_chart, width="stretch")
 
         st.subheader("Transport Cost per 1000 Bricks")
         sales_period["Freight"] = utils.to_numeric_series(
@@ -369,7 +380,7 @@ def render() -> None:
                 tooltip=["Period", "Freight_per_1000"],
             )
         )
-        st.altair_chart(freight_chart, use_container_width=True)
+        st.altair_chart(freight_chart, width="stretch")
 
         if daily_capacity and not labour_period.empty:
             st.subheader("Capacity Utilization Trend")
@@ -395,7 +406,7 @@ def render() -> None:
                     y=alt.Y("Capacity:Q", title="Capacity"),
                 ),
             ).resolve_scale(y="independent")
-            st.altair_chart(cap_chart, use_container_width=True)
+            st.altair_chart(cap_chart, width="stretch")
 
             util_chart = (
                 alt.Chart(capacity_summary)
@@ -406,7 +417,7 @@ def render() -> None:
                     tooltip=["Period", "Utilization"],
                 )
             )
-            st.altair_chart(util_chart, use_container_width=True)
+            st.altair_chart(util_chart, width="stretch")
 
     st.subheader("Production Efficiency")
     if production_filtered.empty:
@@ -429,7 +440,7 @@ def render() -> None:
                 tooltip=["Date", "No_of_Bricks", "No_of_Labour", "Efficiency"],
             )
         )
-        st.altair_chart(efficiency_chart, use_container_width=True)
+        st.altair_chart(efficiency_chart, width="stretch")
 
     st.subheader("Material Consumption vs Output")
     if production_filtered.empty:
@@ -440,6 +451,7 @@ def render() -> None:
             columns={
                 "Cement_Consumption": "Cement",
                 "FlyAsh_Consumption": "Fly Ash",
+                "StoneDust_Consumption": "Stone Dust",
             }
         )
         consumption["No_of_Bricks"] = utils.to_numeric_series(
@@ -447,7 +459,7 @@ def render() -> None:
         ).fillna(0.0)
         melt = consumption.melt(
             id_vars=["Date", "No_of_Bricks"],
-            value_vars=["Cement", "Fly Ash"],
+            value_vars=["Cement", "Fly Ash", "Stone Dust"],
             var_name="Material",
             value_name="Quantity",
         )
@@ -466,14 +478,14 @@ def render() -> None:
             .mark_bar(opacity=0.3)
             .encode(x="Date:T", y="No_of_Bricks:Q", tooltip=["Date", "No_of_Bricks"])
         )
-        st.altair_chart((line + bricks).resolve_scale(y="independent"), use_container_width=True)
+        st.altair_chart((line + bricks).resolve_scale(y="independent"), width="stretch")
 
     st.subheader("Customer Outstanding and Stock")
     col1, col2 = st.columns(2)
     with col1:
         if not customers.empty:
             customer_view = customers[["Customer_ID", "Name", "Outstanding_Balance"]].copy()
-            st.dataframe(customer_view, use_container_width=True)
+            st.dataframe(customer_view, width="stretch")
         else:
             st.info("No customer data available.")
 
@@ -491,7 +503,7 @@ def render() -> None:
                 .tail(1)
                 .sort_values("Material")
             )
-            st.dataframe(latest_stock, use_container_width=True)
+            st.dataframe(latest_stock, width="stretch")
 
     if not stock_log.empty:
         stock_chart = (
@@ -504,7 +516,7 @@ def render() -> None:
                 tooltip=["Date", "Material", "Closing"],
             )
         )
-        st.altair_chart(stock_chart, use_container_width=True)
+        st.altair_chart(stock_chart, width="stretch")
 
     st.subheader("Dashboard Diagnostics")
     with st.expander("Data quality checks", expanded=False):
@@ -522,7 +534,7 @@ def render() -> None:
                 }
             )
             if invalid_date.any():
-                st.dataframe(frame[invalid_date].head(5), use_container_width=True)
+                st.dataframe(frame[invalid_date].head(5), width="stretch")
             for column in numeric_cols:
                 numeric = utils.to_numeric_series(frame.get(column, pd.Series(dtype=str)))
                 invalid_num = numeric.isna()
@@ -533,7 +545,7 @@ def render() -> None:
                     }
                 )
                 if invalid_num.any():
-                    st.dataframe(frame[invalid_num].head(5), use_container_width=True)
+                    st.dataframe(frame[invalid_num].head(5), width="stretch")
 
         _quality_block(
             "Production Log",

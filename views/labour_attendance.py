@@ -24,7 +24,10 @@ PRODUCTION_COLUMNS = [
     "No_of_Bricks",
     "Cement_Consumption",
     "FlyAsh_Consumption",
+    "StoneDust_Consumption",
     "No_of_Labour",
+    "Labour_Basis",
+    "Contract_Rate",
     "Labour_Expense",
     "Labour_Payment_Date",
     "Actual_Payment_Amount",
@@ -72,7 +75,10 @@ def _sync_production_log(
             "No_of_Bricks": 0,
             "Cement_Consumption": 0,
             "FlyAsh_Consumption": 0,
+            "StoneDust_Consumption": 0,
             "No_of_Labour": present_count,
+            "Labour_Basis": "Day",
+            "Contract_Rate": 0,
             "Labour_Expense": labour_expense,
             "Labour_Payment_Date": date_str,
             "Actual_Payment_Amount": 0,
@@ -86,10 +92,12 @@ def _sync_production_log(
         prod_id = str(row.get("Prod_ID", "")).strip()
         if not prod_id:
             continue
-        update_data = {
-            "No_of_Labour": present_count,
-            "Labour_Expense": labour_expense,
-        }
+        basis = str(row.get("Labour_Basis", "")).strip().lower()
+        is_contract = basis.startswith("contract")
+        update_data = {"No_of_Labour": present_count}
+        if not is_contract:
+            update_data["Labour_Basis"] = "Day"
+            update_data["Labour_Expense"] = labour_expense
         if not str(row.get("Labour_Payment_Date", "")).strip():
             update_data["Labour_Payment_Date"] = date_str
         database.update_row(
@@ -153,7 +161,7 @@ def render() -> None:
     grid_df = pd.DataFrame(grid_rows)
     edited = st.data_editor(
         grid_df,
-        use_container_width=True,
+        width="stretch",
         disabled=["Labour_ID", "Name"],
         column_config={
             "Present": st.column_config.CheckboxColumn("Present"),
@@ -217,4 +225,4 @@ def render() -> None:
     if log.empty:
         st.info("No attendance logged for this date.")
     else:
-        st.dataframe(log, use_container_width=True)
+        st.dataframe(log, width="stretch")

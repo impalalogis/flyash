@@ -53,7 +53,7 @@ def _edit_table(
     edited = st.data_editor(
         data_frame,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         disabled=[id_column],
         column_config=column_config,
         key=f"{table_name}_editor",

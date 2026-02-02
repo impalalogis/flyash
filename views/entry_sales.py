@@ -166,7 +166,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        use_container_width=True,
+        width="stretch",
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="sales_entries",
     )
@@ -540,11 +540,11 @@ def render() -> None:
 
     if mask.any().any():
         st.caption("Rows highlighted in red need correction. Calculated fields will be refreshed.")
-        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            use_container_width=True,
+            width="stretch",
             disabled=["Sales_ID"],
             key="sales_invalid_editor",
         )

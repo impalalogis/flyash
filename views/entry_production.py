@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 
 import database
@@ -15,11 +16,17 @@ PRODUCTION_COLUMNS = [
     "No_of_Bricks",
     "Cement_Consumption",
     "FlyAsh_Consumption",
+    "StoneDust_Consumption",
     "No_of_Labour",
+    "Labour_Basis",
+    "Contract_Rate",
     "Labour_Expense",
     "Labour_Payment_Date",
     "Actual_Payment_Amount",
 ]
+
+STONE_DUST_PER_BRICK = 1.38
+FLYASH_PER_BRICK = 1.84
 
 
 def _attendance_count(attendance_df, prod_date: date) -> tuple[int, bool]:
@@ -49,7 +56,24 @@ def render() -> None:
             prod_date = st.date_input("Date", value=date.today(), key="production_date")
             no_of_bricks = st.number_input("No of Bricks", min_value=0, step=1)
             cement_consumption = st.number_input("Cement Consumption", min_value=0.0, step=1.0)
-            flyash_consumption = st.number_input("Fly Ash Consumption", min_value=0.0, step=1.0)
+            flyash_consumption = round(no_of_bricks * FLYASH_PER_BRICK, 2)
+            st.number_input(
+                "Fly Ash Consumption (auto)",
+                min_value=0.0,
+                value=flyash_consumption,
+                step=0.01,
+                format="%.2f",
+                disabled=True,
+            )
+            stone_dust_consumption = round(no_of_bricks * STONE_DUST_PER_BRICK, 2)
+            st.number_input(
+                "Stone Dust Consumption (auto)",
+                min_value=0.0,
+                value=stone_dust_consumption,
+                step=0.01,
+                format="%.2f",
+                disabled=True,
+            )
         with col2:
             attendance_count, has_attendance = _attendance_count(attendance_df, prod_date)
             if st.session_state.get("production_attendance_date") != prod_date:
@@ -66,6 +90,19 @@ def render() -> None:
                 st.caption(f"Attendance count for date: {attendance_count}")
             else:
                 st.caption("No attendance logged for this date.")
+            labour_basis = st.radio(
+                "Labour Expense Basis",
+                ["Day", "Contract"],
+                horizontal=True,
+            )
+            contract_rate = st.number_input(
+                "Contract Rate (per brick)",
+                min_value=0.0,
+                step=0.01,
+                disabled=labour_basis != "Contract",
+            )
+            if labour_basis != "Contract":
+                contract_rate = 0.0
             labour_payment_date = st.date_input(
                 "Labour Payment Date",
                 value=prod_date,
@@ -76,9 +113,20 @@ def render() -> None:
                 step=1.0,
             )
 
-        labour_expense = utils.calculate_labour_expense(no_of_labour, avg_wage)
+        labour_expense = utils.calculate_labour_expense(
+            no_of_labour,
+            avg_wage,
+            basis=labour_basis,
+            no_of_bricks=no_of_bricks,
+            contract_rate=contract_rate,
+        )
         st.markdown("**Calculated Labour Expense**")
-        st.write(f"Average Daily Wage: {avg_wage:,.2f}")
+        if labour_basis == "Contract":
+            st.write(f"Contract Rate: {contract_rate:,.2f}")
+            st.write(f"Bricks: {no_of_bricks:,.0f}")
+        else:
+            st.write(f"Average Daily Wage: {avg_wage:,.2f}")
+            st.write(f"No of Labour: {no_of_labour:,.0f}")
         st.write(f"Labour Expense: {labour_expense:,.2f}")
 
         submitted = st.form_submit_button("Save Entry")
@@ -87,8 +135,10 @@ def render() -> None:
         errors = []
         if no_of_bricks <= 0:
             errors.append("No of Bricks must be greater than 0.")
-        if no_of_labour <= 0:
-            errors.append("No of Labour must be greater than 0.")
+        if labour_basis == "Day" and no_of_labour <= 0:
+            errors.append("No of Labour must be greater than 0 for day basis.")
+        if labour_basis == "Contract" and contract_rate <= 0:
+            errors.append("Contract Rate must be greater than 0 for contract basis.")
 
         if errors:
             for error in errors:
@@ -109,7 +159,10 @@ def render() -> None:
                 "No_of_Bricks": no_of_bricks,
                 "Cement_Consumption": cement_consumption,
                 "FlyAsh_Consumption": flyash_consumption,
+                "StoneDust_Consumption": stone_dust_consumption,
                 "No_of_Labour": no_of_labour,
+                "Labour_Basis": labour_basis,
+                "Contract_Rate": contract_rate,
                 "Labour_Expense": labour_expense,
                 "Labour_Payment_Date": labour_payment_date.isoformat(),
                 "Actual_Payment_Amount": actual_payment_amount,
@@ -132,7 +185,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        use_container_width=True,
+        width="stretch",
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="production_entries",
     )
@@ -154,18 +207,42 @@ def render() -> None:
         "No_of_Bricks": {"numeric": True, "min": 0},
         "Cement_Consumption": {"numeric": True, "min": 0},
         "FlyAsh_Consumption": {"numeric": True, "min": 0},
+        "StoneDust_Consumption": {"numeric": True, "min": 0},
         "No_of_Labour": {"numeric": True, "min": 0},
         "Labour_Expense": {"numeric": True, "min": 0},
         "Actual_Payment_Amount": {"numeric": True, "min": 0},
     }
     mask, errors = utils.build_validation_mask(entries, rules)
+    bricks = pd.to_numeric(entries.get("No_of_Bricks", pd.Series(dtype=float)), errors="coerce")
+    flyash = pd.to_numeric(
+        entries.get("FlyAsh_Consumption", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    stone_dust = pd.to_numeric(
+        entries.get("StoneDust_Consumption", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    expected_flyash = bricks * FLYASH_PER_BRICK
+    expected_stone_dust = bricks * STONE_DUST_PER_BRICK
+    invalid_flyash = (flyash - expected_flyash).abs() > 0.01
+    invalid_stone_dust = (stone_dust - expected_stone_dust).abs() > 0.01
+    mask = utils.apply_invalid_mask(mask, "FlyAsh_Consumption", invalid_flyash)
+    mask = utils.apply_invalid_mask(mask, "StoneDust_Consumption", invalid_stone_dust)
+    basis = entries.get("Labour_Basis", pd.Series(dtype=str)).astype(str).str.strip().str.lower()
+    contract_rate = pd.to_numeric(
+        entries.get("Contract_Rate", pd.Series(dtype=float)),
+        errors="coerce",
+    ).fillna(0.0)
+    contract_mask = basis.str.startswith("contract")
+    invalid_contract_rate = contract_mask & (contract_rate <= 0)
+    mask = utils.apply_invalid_mask(mask, "Contract_Rate", invalid_contract_rate)
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            use_container_width=True,
+            width="stretch",
             disabled=["Prod_ID"],
             key="production_invalid_editor",
         )
