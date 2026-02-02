@@ -534,6 +534,10 @@ def render() -> None:
             if frame.empty:
                 st.write("No rows.")
                 return
+            def _preview(sample: pd.DataFrame) -> pd.DataFrame:
+                cleaned = sample.copy()
+                cleaned = cleaned.where(pd.notnull(cleaned), "")
+                return cleaned.astype(str)
             date_series = pd.to_datetime(frame.get(date_col, pd.Series(dtype=str)), errors="coerce", dayfirst=True)
             invalid_date = date_series.isna()
             st.write(
@@ -543,7 +547,7 @@ def render() -> None:
                 }
             )
             if invalid_date.any():
-                st.dataframe(frame[invalid_date].head(5), width="stretch")
+                st.dataframe(_preview(frame[invalid_date].head(5)), width="stretch")
             for column in numeric_cols:
                 numeric = utils.to_numeric_series(frame.get(column, pd.Series(dtype=str)))
                 invalid_num = numeric.isna()
@@ -554,7 +558,7 @@ def render() -> None:
                     }
                 )
                 if invalid_num.any():
-                    st.dataframe(frame[invalid_num].head(5), width="stretch")
+                    st.dataframe(_preview(frame[invalid_num].head(5)), width="stretch")
 
         _quality_block(
             "Production Log",
