@@ -214,6 +214,18 @@ def render() -> None:
         st.error("Missing Prod_ID column in Production_Log.")
         return
 
+    numeric_columns = [
+        "No_of_Bricks",
+        "Cement_Consumption",
+        "FlyAsh_Consumption",
+        "StoneDust_Consumption",
+        "No_of_Labour",
+        "Contract_Rate",
+        "Labour_Expense",
+        "Actual_Payment_Amount",
+    ]
+    entries = utils.coerce_numeric_columns(entries, numeric_columns)
+
     display_entries = entries.copy()
     display_entries["Delete"] = False
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
@@ -282,6 +294,7 @@ def render() -> None:
         )
         if st.button("Save Corrections", key="production_save_corrections"):
             for _, row in edited_invalid.iterrows():
+                row = row.where(pd.notnull(row), "")
                 row_id = str(row.get("Prod_ID", "")).strip()
                 if not row_id:
                     continue

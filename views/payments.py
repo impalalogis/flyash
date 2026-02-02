@@ -122,6 +122,7 @@ def render() -> None:
         customer_id = customer_labels[payment_customer]
         payments_df = payments_df[payments_df["Customer_ID"] == customer_id]
 
+    payments_df = utils.coerce_numeric_columns(payments_df, ["Amount_Paid"])
     st.dataframe(payments_df, width="stretch")
 
     st.subheader("Payment Records")
@@ -132,6 +133,9 @@ def render() -> None:
     if "Payment_ID" not in entries.columns:
         st.error("Missing Payment_ID column in Payments.")
         return
+
+    numeric_columns = ["Amount_Paid"]
+    entries = utils.coerce_numeric_columns(entries, numeric_columns)
 
     display_entries = entries.copy()
     display_entries["Delete"] = False
@@ -198,6 +202,7 @@ def render() -> None:
                 else pd.Series(dtype=float)
             ).to_dict()
             for _, row in edited_invalid.iterrows():
+                row = row.where(pd.notnull(row), "")
                 row_id = str(row.get("Payment_ID", "")).strip()
                 if not row_id:
                     continue

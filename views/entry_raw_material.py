@@ -168,6 +168,22 @@ def render() -> None:
         st.error("Missing RM_ID column in Raw_Material_Log.")
         return
 
+    numeric_columns = [
+        "Qty",
+        "Rate",
+        "GST",
+        "Trip_Days",
+        "Route_Expenses",
+        "Diesel",
+        "Driver_Salary",
+        "Vehicle_Charge",
+        "Freight",
+        "Amount_Paid",
+        "Material_Rate",
+        "Total_Cost",
+    ]
+    entries = utils.coerce_numeric_columns(entries, numeric_columns)
+
     display_entries = entries.copy()
     display_entries["Delete"] = False
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
@@ -245,6 +261,7 @@ def render() -> None:
         )
         if st.button("Save Corrections", key="raw_material_save_corrections"):
             for _, row in edited_invalid.iterrows():
+                row = row.where(pd.notnull(row), "")
                 row_id = str(row.get("RM_ID", "")).strip()
                 if not row_id:
                     continue
