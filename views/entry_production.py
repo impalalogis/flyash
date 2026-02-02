@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -110,22 +110,15 @@ def render() -> None:
                 ["Day", "Contract"],
                 horizontal=True,
             )
-            if labour_basis == "Day":
-                if st.session_state.get("production_attendance_date") != prod_date:
-                    st.session_state["production_attendance_date"] = prod_date
-                st.session_state["production_no_of_labour"] = (
-                    attendance_count if has_attendance else 0
-                )
             no_of_labour = st.number_input(
                 "No of Labour",
                 min_value=0,
                 step=1,
                 key="production_no_of_labour",
-                disabled=labour_basis == "Day",
             )
             if labour_basis == "Day":
                 if has_attendance:
-                    st.caption(f"Attendance count for date: {attendance_count}")
+                    st.caption(f"Attendance count for date: {attendance_count} (reference)")
                 else:
                     st.caption("No attendance logged for this date.")
             contract_rate = st.number_input(
@@ -137,9 +130,14 @@ def render() -> None:
             )
             if labour_basis != "Contract":
                 contract_rate = 0.0
+            week_start = prod_date - timedelta(days=prod_date.weekday())
+            week_end = week_start + timedelta(days=6)
             labour_payment_date = st.date_input(
                 "Labour Payment Date",
                 value=prod_date,
+                min_value=week_start,
+                max_value=week_end,
+                help=f"Select a date between {week_start} and {week_end}.",
             )
             actual_payment_amount = st.number_input(
                 "Actual Payment Amount",
