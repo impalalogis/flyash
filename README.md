@@ -102,6 +102,7 @@ Notes:
 - Labour_Basis supports Day or Contract. For Day, Labour_Expense = avg daily wage * No_of_Labour.
   For Contract, Labour_Expense = No_of_Bricks * Contract_Rate.
 - Contract rate default is configurable via `production.contract_rate`.
+- For Day basis, No_of_Labour is auto-filled from Labour_Attendance for the date.
 
 **Sales_Log**
 - Sales_ID

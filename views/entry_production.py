@@ -105,25 +105,29 @@ def render() -> None:
             )
         with col2:
             attendance_count, has_attendance = _attendance_count(attendance_df, prod_date)
-            if st.session_state.get("production_attendance_date") != prod_date:
-                st.session_state["production_attendance_date"] = prod_date
-                if has_attendance:
-                    st.session_state["production_no_of_labour"] = attendance_count
-            no_of_labour = st.number_input(
-                "No of Labour",
-                min_value=0,
-                step=1,
-                key="production_no_of_labour",
-            )
-            if has_attendance:
-                st.caption(f"Attendance count for date: {attendance_count}")
-            else:
-                st.caption("No attendance logged for this date.")
             labour_basis = st.radio(
                 "Labour Expense Basis",
                 ["Day", "Contract"],
                 horizontal=True,
             )
+            if labour_basis == "Day":
+                if st.session_state.get("production_attendance_date") != prod_date:
+                    st.session_state["production_attendance_date"] = prod_date
+                st.session_state["production_no_of_labour"] = (
+                    attendance_count if has_attendance else 0
+                )
+            no_of_labour = st.number_input(
+                "No of Labour",
+                min_value=0,
+                step=1,
+                key="production_no_of_labour",
+                disabled=labour_basis == "Day",
+            )
+            if labour_basis == "Day":
+                if has_attendance:
+                    st.caption(f"Attendance count for date: {attendance_count}")
+                else:
+                    st.caption("No attendance logged for this date.")
             contract_rate = st.number_input(
                 "Contract Rate (per brick)",
                 min_value=0.0,
