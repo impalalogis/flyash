@@ -153,7 +153,7 @@ def render() -> None:
     grid_df = pd.DataFrame(grid_rows)
     edited = st.data_editor(
         grid_df,
-        use_container_width=True,
+        width="stretch",
         disabled=["Labour_ID", "Name"],
         column_config={
             "Present": st.column_config.CheckboxColumn("Present"),
@@ -217,4 +217,4 @@ def render() -> None:
     if log.empty:
         st.info("No attendance logged for this date.")
     else:
-        st.dataframe(log, use_container_width=True)
+        st.dataframe(log, width="stretch")

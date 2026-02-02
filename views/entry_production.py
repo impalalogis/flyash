@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 
 import database
@@ -132,7 +133,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        use_container_width=True,
+        width="stretch",
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="production_entries",
     )
@@ -161,11 +162,11 @@ def render() -> None:
     mask, errors = utils.build_validation_mask(entries, rules)
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            use_container_width=True,
+            width="stretch",
             disabled=["Prod_ID"],
             key="production_invalid_editor",
         )

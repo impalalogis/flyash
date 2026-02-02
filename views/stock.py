@@ -47,7 +47,7 @@ def render() -> None:
         .tail(1)
         .sort_values("Material")
     )
-    st.dataframe(latest, use_container_width=True)
+    st.dataframe(latest, width="stretch")
 
     st.subheader("Stock Log")
-    st.dataframe(filtered.sort_values(["Date", "Material"]), use_container_width=True)
+    st.dataframe(filtered.sort_values(["Date", "Material"]), width="stretch")

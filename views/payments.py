@@ -122,7 +122,7 @@ def render() -> None:
         customer_id = customer_labels[payment_customer]
         payments_df = payments_df[payments_df["Customer_ID"] == customer_id]
 
-    st.dataframe(payments_df, use_container_width=True)
+    st.dataframe(payments_df, width="stretch")
 
     st.subheader("Payment Records")
     entries = database.read_table("Payments")
@@ -138,7 +138,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        use_container_width=True,
+        width="stretch",
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="payments_entries",
     )
@@ -182,11 +182,11 @@ def render() -> None:
     mask, errors = utils.build_validation_mask(entries, rules)
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
+        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            use_container_width=True,
+            width="stretch",
             disabled=["Payment_ID"],
             key="payments_invalid_editor",
         )
