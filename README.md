@@ -88,10 +88,19 @@ Add the following header row (row 1) for each tab:
 - No_of_Bricks
 - Cement_Consumption
 - FlyAsh_Consumption
+- StoneDust_Consumption
 - No_of_Labour
+- Labour_Basis
+- Contract_Rate
 - Labour_Expense
 - Labour_Payment_Date
 - Actual_Payment_Amount
+
+Notes:
+- Fly ash consumption is calculated as 1.84 per brick.
+- Stone dust consumption is calculated as 1.38 per brick.
+- Labour_Basis supports Day or Contract. For Day, Labour_Expense = avg daily wage * No_of_Labour.
+  For Contract, Labour_Expense = No_of_Bricks * Contract_Rate.
 
 **Sales_Log**
 - Sales_ID

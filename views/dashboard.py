@@ -301,12 +301,15 @@ def render() -> None:
         consumption_period["FlyAsh_Consumption"] = utils.to_numeric_series(
             consumption_period.get("FlyAsh_Consumption", pd.Series(dtype=float))
         ).fillna(0.0)
+        consumption_period["StoneDust_Consumption"] = utils.to_numeric_series(
+            consumption_period.get("StoneDust_Consumption", pd.Series(dtype=float))
+        ).fillna(0.0)
         consumption_period["No_of_Bricks"] = utils.to_numeric_series(
             consumption_period.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
         consumption_summary = (
             consumption_period.groupby("Period", dropna=False)[
-                ["Cement_Consumption", "FlyAsh_Consumption", "No_of_Bricks"]
+                ["Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption", "No_of_Bricks"]
             ]
             .sum()
             .reset_index()
@@ -327,9 +330,17 @@ def render() -> None:
             ),
             axis=1,
         )
+        consumption_summary["StoneDust_per_1000"] = consumption_summary.apply(
+            lambda row: (
+                row["StoneDust_Consumption"] / row["No_of_Bricks"] * 1000
+                if row["No_of_Bricks"]
+                else 0.0
+            ),
+            axis=1,
+        )
         consumption_melt = consumption_summary.melt(
             id_vars=["Period"],
-            value_vars=["Cement_per_1000", "FlyAsh_per_1000"],
+            value_vars=["Cement_per_1000", "FlyAsh_per_1000", "StoneDust_per_1000"],
             var_name="Material",
             value_name="Per_1000",
         )
@@ -440,6 +451,7 @@ def render() -> None:
             columns={
                 "Cement_Consumption": "Cement",
                 "FlyAsh_Consumption": "Fly Ash",
+                "StoneDust_Consumption": "Stone Dust",
             }
         )
         consumption["No_of_Bricks"] = utils.to_numeric_series(
@@ -447,7 +459,7 @@ def render() -> None:
         ).fillna(0.0)
         melt = consumption.melt(
             id_vars=["Date", "No_of_Bricks"],
-            value_vars=["Cement", "Fly Ash"],
+            value_vars=["Cement", "Fly Ash", "Stone Dust"],
             var_name="Material",
             value_name="Quantity",
         )

@@ -53,8 +53,18 @@ def calculate_total_cost(
     return (qty * rate) + gst + route_expenses + diesel + driver_salary + vehicle_charge + freight
 
 
-def calculate_labour_expense(no_of_labour: int, avg_daily_wage: float) -> float:
-    return no_of_labour * avg_daily_wage
+def calculate_labour_expense(
+    no_of_labour: int,
+    avg_daily_wage: float,
+    *,
+    basis: str = "Day",
+    no_of_bricks: int = 0,
+    contract_rate: float = 0.0,
+) -> float:
+    basis_value = str(basis).strip().lower()
+    if basis_value.startswith("contract"):
+        return float(no_of_bricks) * float(contract_rate)
+    return float(no_of_labour) * float(avg_daily_wage)
 
 
 def calculate_sales_amount(no_of_bricks: int, rate: float) -> float:
@@ -484,7 +494,7 @@ def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.D
     raw_df = ensure_columns(raw_df, ["Date", "Material", "Qty"])
     production_df = ensure_columns(
         production_df,
-        ["Date", "Cement_Consumption", "FlyAsh_Consumption"],
+        ["Date", "Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption"],
     )
 
     raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce").dt.date
@@ -506,6 +516,7 @@ def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.D
     consumption_map = {
         "Cement": "Cement_Consumption",
         "Fly Ash": "FlyAsh_Consumption",
+        "Stone Dust": "StoneDust_Consumption",
     }
     for material, column in consumption_map.items():
         if column not in production_df.columns:
