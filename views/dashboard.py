@@ -46,9 +46,55 @@ def render() -> None:
     st.header("Dashboard")
 
     raw_materials = _parse_dates(database.read_table("Raw_Material_Log"), "Date")
+    raw_materials = utils.coerce_numeric_columns(
+        raw_materials,
+        [
+            "Qty",
+            "Rate",
+            "GST",
+            "Trip_Days",
+            "Route_Expenses",
+            "Diesel",
+            "Driver_Salary",
+            "Vehicle_Charge",
+            "Freight",
+            "Amount_Paid",
+            "Material_Rate",
+            "Total_Cost",
+        ],
+    )
     production = _parse_dates(database.read_table("Production_Log"), "Date")
+    production = utils.coerce_numeric_columns(
+        production,
+        [
+            "No_of_Bricks",
+            "Cement_Consumption",
+            "FlyAsh_Consumption",
+            "StoneDust_Consumption",
+            "No_of_Labour",
+            "Contract_Rate",
+            "Labour_Expense",
+            "Actual_Payment_Amount",
+        ],
+    )
     sales = _parse_dates(database.read_table("Sales_Log"), "Date")
+    sales = utils.coerce_numeric_columns(
+        sales,
+        [
+            "No_of_Bricks",
+            "Rate",
+            "Amount",
+            "Freight",
+            "Total_Amount",
+            "Amount_Received",
+            "Due",
+        ],
+    )
     stock_log = _parse_dates(database.read_table("Stock_Log"), "Date")
+    stock_log = utils.coerce_numeric_columns(
+        stock_log,
+        ["Opening", "Inward", "Consumed", "Closing"],
+    )
     customers = database.read_table("Customers")
 
     all_dates = []

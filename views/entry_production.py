@@ -306,6 +306,9 @@ def render() -> None:
                 row_id = str(row.get("Prod_ID", "")).strip()
                 if not row_id:
                     continue
+                basis_value = str(row.get("Labour_Basis", "")).strip().lower()
+                if basis_value.startswith("day"):
+                    row["Contract_Rate"] = 0.0
                 database.update_row(
                     "Production_Log",
                     row_id,
