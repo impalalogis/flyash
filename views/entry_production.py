@@ -423,7 +423,7 @@ def render() -> None:
                     ).fillna(0.0)
                     day_expense = labour_count * avg_wage
                     contract_expense = bricks * float(backfill_contract_rate)
-                    labour_expense = day_expense.where(~basis_is_contract, contract_expense)
+                    labour_expense = contract_expense if basis_is_contract else day_expense
                     updated.loc[in_range, "Labour_Expense"] = labour_expense
 
                     def _range_label(value: object) -> str:
