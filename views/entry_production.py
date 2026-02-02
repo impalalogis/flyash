@@ -317,3 +317,111 @@ def render() -> None:
             st.rerun()
     else:
         st.success("No validation issues found.")
+
+    st.subheader("Maintenance")
+    with st.expander("Backfill computed columns (overwrite)", expanded=False):
+        st.write(
+            "Overwrites FlyAsh_Consumption, StoneDust_Consumption, Labour_Basis, "
+            "Contract_Rate, Labour_Expense, and Labour_Payment_Date using current "
+            "configuration for the selected date range."
+        )
+
+        date_series = pd.to_datetime(
+            entries.get("Date", pd.Series(dtype=str)),
+            errors="coerce",
+        ).dt.date
+        valid_dates = date_series.dropna()
+        if valid_dates.empty:
+            st.info("No valid production dates available for backfill.")
+        else:
+            min_date = valid_dates.min()
+            max_date = valid_dates.max()
+            backfill_range = st.date_input(
+                "Backfill date range",
+                value=(min_date, max_date),
+                key="production_backfill_range",
+            )
+            if isinstance(backfill_range, tuple) and len(backfill_range) == 2:
+                start_date, end_date = backfill_range
+            else:
+                start_date = min_date
+                end_date = max_date
+
+            if st.button("Overwrite computed fields", key="production_backfill"):
+                production_df = database.read_table("Production_Log")
+                if production_df.empty:
+                    st.info("No production entries available to update.")
+                else:
+                    updated = production_df.copy()
+                    for column in PRODUCTION_COLUMNS:
+                        if column not in updated.columns:
+                            updated[column] = ""
+
+                    dates = pd.to_datetime(
+                        updated.get("Date", pd.Series(dtype=str)),
+                        errors="coerce",
+                    ).dt.date
+                    in_range = (dates >= start_date) & (dates <= end_date)
+                    in_range = in_range.fillna(False)
+                    if not in_range.any():
+                        st.info("No production entries found in the selected range.")
+                        return
+
+                    bricks = pd.to_numeric(
+                        updated.get("No_of_Bricks", pd.Series(dtype=float)),
+                        errors="coerce",
+                    ).fillna(0.0)
+                    updated.loc[in_range, "FlyAsh_Consumption"] = (
+                        bricks * flyash_per_brick
+                    ).round(2)
+                    updated.loc[in_range, "StoneDust_Consumption"] = (
+                        bricks * stone_dust_per_brick
+                    ).round(2)
+
+                    contract_rate_series = pd.to_numeric(
+                        updated.get("Contract_Rate", pd.Series(dtype=float)),
+                        errors="coerce",
+                    ).fillna(0.0)
+                    basis_series = (
+                        updated.get("Labour_Basis", pd.Series(dtype=str))
+                        .astype(str)
+                        .str.strip()
+                        .str.lower()
+                    )
+                    basis_is_contract = basis_series.str.startswith("contract") | (
+                        contract_rate_series > 0
+                    )
+                    new_basis = basis_is_contract.map(
+                        lambda value: "Contract" if value else "Day"
+                    )
+                    updated.loc[in_range, "Labour_Basis"] = new_basis
+                    updated.loc[in_range, "Contract_Rate"] = contract_rate_series
+                    updated.loc[in_range & ~basis_is_contract, "Contract_Rate"] = 0.0
+                    if contract_rate_default > 0:
+                        needs_default = in_range & basis_is_contract & (
+                            updated["Contract_Rate"] <= 0
+                        )
+                        updated.loc[needs_default, "Contract_Rate"] = contract_rate_default
+
+                    labour_count = pd.to_numeric(
+                        updated.get("No_of_Labour", pd.Series(dtype=float)),
+                        errors="coerce",
+                    ).fillna(0.0)
+                    day_expense = labour_count * avg_wage
+                    contract_rate_vals = pd.to_numeric(
+                        updated.get("Contract_Rate", pd.Series(dtype=float)),
+                        errors="coerce",
+                    ).fillna(0.0)
+                    contract_expense = bricks * contract_rate_vals
+                    labour_expense = day_expense.where(~basis_is_contract, contract_expense)
+                    updated.loc[in_range, "Labour_Expense"] = labour_expense
+
+                    def _range_label(value: object) -> str:
+                        if pd.isna(value):
+                            return ""
+                        return utils.payment_week_range(value, payment_week_range_weeks)[2]
+
+                    updated.loc[in_range, "Labour_Payment_Date"] = dates.apply(_range_label)
+
+                    database.replace_table("Production_Log", updated)
+                    st.success("Production log updated.")
