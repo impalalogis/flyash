@@ -325,6 +325,39 @@ def render() -> None:
             "Contract_Rate, Labour_Expense, and Labour_Payment_Date using current "
             "configuration for the selected date range."
         )
+        backfill_col1, backfill_col2 = st.columns(2)
+        with backfill_col1:
+            backfill_flyash_per_brick = st.number_input(
+                "Backfill Fly Ash per brick",
+                min_value=0.0,
+                value=flyash_per_brick,
+                step=0.01,
+                key="backfill_flyash_per_brick",
+            )
+            backfill_stone_dust_per_brick = st.number_input(
+                "Backfill Stone Dust per brick",
+                min_value=0.0,
+                value=stone_dust_per_brick,
+                step=0.01,
+                key="backfill_stone_dust_per_brick",
+            )
+        with backfill_col2:
+            backfill_basis = st.selectbox(
+                "Backfill Labour Basis",
+                ["Day", "Contract"],
+                index=0,
+                key="backfill_labour_basis",
+            )
+            backfill_contract_rate = st.number_input(
+                "Backfill Contract Rate (per brick)",
+                min_value=0.0,
+                value=contract_rate_default,
+                step=0.01,
+                key="backfill_contract_rate",
+                disabled=backfill_basis != "Contract",
+            )
+        if backfill_basis != "Contract":
+            backfill_contract_rate = 0.0
 
         date_series = pd.to_datetime(
             entries.get("Date", pd.Series(dtype=str)),
@@ -372,47 +405,24 @@ def render() -> None:
                         errors="coerce",
                     ).fillna(0.0)
                     updated.loc[in_range, "FlyAsh_Consumption"] = (
-                        bricks * flyash_per_brick
+                        bricks * backfill_flyash_per_brick
                     ).round(2)
                     updated.loc[in_range, "StoneDust_Consumption"] = (
-                        bricks * stone_dust_per_brick
+                        bricks * backfill_stone_dust_per_brick
                     ).round(2)
 
-                    contract_rate_series = pd.to_numeric(
-                        updated.get("Contract_Rate", pd.Series(dtype=float)),
-                        errors="coerce",
-                    ).fillna(0.0)
-                    basis_series = (
-                        updated.get("Labour_Basis", pd.Series(dtype=str))
-                        .astype(str)
-                        .str.strip()
-                        .str.lower()
+                    basis_is_contract = backfill_basis == "Contract"
+                    updated.loc[in_range, "Labour_Basis"] = backfill_basis
+                    updated.loc[in_range, "Contract_Rate"] = (
+                        backfill_contract_rate if basis_is_contract else 0.0
                     )
-                    basis_is_contract = basis_series.str.startswith("contract") | (
-                        contract_rate_series > 0
-                    )
-                    new_basis = basis_is_contract.map(
-                        lambda value: "Contract" if value else "Day"
-                    )
-                    updated.loc[in_range, "Labour_Basis"] = new_basis
-                    updated.loc[in_range, "Contract_Rate"] = contract_rate_series
-                    updated.loc[in_range & ~basis_is_contract, "Contract_Rate"] = 0.0
-                    if contract_rate_default > 0:
-                        needs_default = in_range & basis_is_contract & (
-                            updated["Contract_Rate"] <= 0
-                        )
-                        updated.loc[needs_default, "Contract_Rate"] = contract_rate_default
 
                     labour_count = pd.to_numeric(
                         updated.get("No_of_Labour", pd.Series(dtype=float)),
                         errors="coerce",
                     ).fillna(0.0)
                     day_expense = labour_count * avg_wage
-                    contract_rate_vals = pd.to_numeric(
-                        updated.get("Contract_Rate", pd.Series(dtype=float)),
-                        errors="coerce",
-                    ).fillna(0.0)
-                    contract_expense = bricks * contract_rate_vals
+                    contract_expense = bricks * float(backfill_contract_rate)
                     labour_expense = day_expense.where(~basis_is_contract, contract_expense)
                     updated.loc[in_range, "Labour_Expense"] = labour_expense
 
