@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 from typing import Iterable
 import base64
@@ -42,6 +42,14 @@ def coerce_numeric_columns(data_frame: pd.DataFrame, columns: Iterable[str]) -> 
         if column in data_frame.columns:
             data_frame[column] = to_numeric_series(data_frame[column])
     return data_frame
+
+
+def payment_week_range(entry_date: date, weeks: int) -> tuple[date, date, str]:
+    weeks = max(1, int(weeks))
+    week_start = entry_date - timedelta(days=entry_date.weekday())
+    week_end = week_start + timedelta(days=(7 * weeks) - 1)
+    label = f"{week_start:%d-%b-%Y} - {week_end:%d-%b-%Y}"
+    return week_start, week_end, label
 
 
 def to_month_string(value: date) -> str:

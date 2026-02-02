@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -51,7 +51,7 @@ def _get_production_config() -> dict[str, float]:
         config.get("payment_week_range_weeks"),
         default=DEFAULT_PAYMENT_WEEK_RANGE,
     )
-    if payment_week_range < 0:
+    if payment_week_range < 1:
         payment_week_range = DEFAULT_PAYMENT_WEEK_RANGE
     return {
         "flyash_per_brick": flyash_per_brick,
@@ -139,21 +139,15 @@ def render() -> None:
             )
             if labour_basis != "Contract":
                 contract_rate = 0.0
-            week_start = prod_date - timedelta(days=prod_date.weekday())
-            last_week_monday = week_start - timedelta(weeks=payment_week_range_weeks)
-            next_week_sunday = week_start + timedelta(days=6, weeks=payment_week_range_weeks)
-            payment_dates = [
-                last_week_monday + timedelta(days=offset)
-                for offset in range((next_week_sunday - last_week_monday).days + 1)
-            ]
+            _, _, payment_range_label = utils.payment_week_range(
+                prod_date,
+                payment_week_range_weeks,
+            )
             labour_payment_date = st.selectbox(
                 "Labour Payment Date",
-                options=payment_dates,
-                index=payment_dates.index(prod_date),
-                format_func=lambda value: value.isoformat(),
-                help=(
-                    "Select a date between last week's Monday and next week's Sunday."
-                ),
+                options=[payment_range_label],
+                index=0,
+                help="Payment date range based on the configured week window.",
             )
             actual_payment_amount = st.number_input(
                 "Actual Payment Amount",
@@ -212,7 +206,7 @@ def render() -> None:
                 "Labour_Basis": labour_basis,
                 "Contract_Rate": contract_rate,
                 "Labour_Expense": labour_expense,
-                "Labour_Payment_Date": labour_payment_date.isoformat(),
+                "Labour_Payment_Date": labour_payment_date,
                 "Actual_Payment_Amount": actual_payment_amount,
             }
             data = {key: data.get(key, "") for key in PRODUCTION_COLUMNS}

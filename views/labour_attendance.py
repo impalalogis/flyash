@@ -61,6 +61,15 @@ def _sync_production_log(
 
     avg_wage = utils.average_daily_wage(labour_df)
     labour_expense = utils.calculate_labour_expense(present_count, avg_wage)
+    production_config = st.secrets.get("production", {})
+    payment_range_weeks = utils.safe_int(
+        production_config.get("payment_week_range_weeks"),
+        default=1,
+    )
+    _, _, payment_range_label = utils.payment_week_range(
+        attendance_date,
+        max(1, payment_range_weeks),
+    )
     date_str = attendance_date.isoformat()
 
     if day_rows.empty:
@@ -80,7 +89,7 @@ def _sync_production_log(
             "Labour_Basis": "Day",
             "Contract_Rate": 0,
             "Labour_Expense": labour_expense,
-            "Labour_Payment_Date": date_str,
+            "Labour_Payment_Date": payment_range_label,
             "Actual_Payment_Amount": 0,
         }
         data = {key: data.get(key, "") for key in PRODUCTION_COLUMNS}
@@ -99,7 +108,7 @@ def _sync_production_log(
             update_data["Labour_Basis"] = "Day"
             update_data["Labour_Expense"] = labour_expense
         if not str(row.get("Labour_Payment_Date", "")).strip():
-            update_data["Labour_Payment_Date"] = date_str
+            update_data["Labour_Payment_Date"] = payment_range_label
         database.update_row(
             "Production_Log",
             prod_id,
