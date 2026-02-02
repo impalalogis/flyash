@@ -130,14 +130,20 @@ def render() -> None:
             )
             if labour_basis != "Contract":
                 contract_rate = 0.0
-            week_start = prod_date - timedelta(days=prod_date.weekday())
-            week_end = week_start + timedelta(days=6)
-            labour_payment_date = st.date_input(
+            last_week_monday = prod_date - timedelta(days=prod_date.weekday() + 7)
+            next_week_sunday = prod_date + timedelta(days=(6 - prod_date.weekday()) + 7)
+            payment_dates = [
+                last_week_monday + timedelta(days=offset)
+                for offset in range((next_week_sunday - last_week_monday).days + 1)
+            ]
+            labour_payment_date = st.selectbox(
                 "Labour Payment Date",
-                value=prod_date,
-                min_value=week_start,
-                max_value=week_end,
-                help=f"Select a date between {week_start} and {week_end}.",
+                options=payment_dates,
+                index=payment_dates.index(prod_date),
+                format_func=lambda value: value.isoformat(),
+                help=(
+                    "Select a date between last week's Monday and next week's Sunday."
+                ),
             )
             actual_payment_amount = st.number_input(
                 "Actual Payment Amount",
