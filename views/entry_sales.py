@@ -161,6 +161,17 @@ def render() -> None:
         st.error("Missing Sales_ID column in Sales_Log.")
         return
 
+    numeric_columns = [
+        "No_of_Bricks",
+        "Rate",
+        "Amount",
+        "Freight",
+        "Total_Amount",
+        "Amount_Received",
+        "Due",
+    ]
+    entries = utils.coerce_numeric_columns(entries, numeric_columns)
+
     display_entries = entries.copy()
     display_entries["Delete"] = False
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
@@ -556,6 +567,7 @@ def render() -> None:
                 else pd.Series(dtype=float)
             ).to_dict()
             for _, row in edited_invalid.iterrows():
+                row = row.where(pd.notnull(row), "")
                 row_id = str(row.get("Sales_ID", "")).strip()
                 if not row_id:
                     continue

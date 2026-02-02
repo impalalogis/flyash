@@ -97,10 +97,12 @@ Add the following header row (row 1) for each tab:
 - Actual_Payment_Amount
 
 Notes:
-- Fly ash consumption is calculated as 1.84 per brick.
-- Stone dust consumption is calculated as 1.38 per brick.
+- Fly ash consumption defaults to 1.84 per brick (configurable via `production.flyash_per_brick`).
+- Stone dust consumption defaults to 1.38 per brick (configurable via `production.stone_dust_per_brick`).
 - Labour_Basis supports Day or Contract. For Day, Labour_Expense = avg daily wage * No_of_Labour.
   For Contract, Labour_Expense = No_of_Bricks * Contract_Rate.
+- Contract rate default is configurable via `production.contract_rate`.
+- For Day basis, No_of_Labour is auto-filled from Labour_Attendance for the date.
 
 **Sales_Log**
 - Sales_ID
@@ -155,6 +157,16 @@ from the JSON key (the `client_email` field).
    `gcp_service_account` in `secrets.toml`.
 3. Set either `gsheets.spreadsheet_id` or `gsheets.spreadsheet_url`.
 4. Keep `private_key` on a single line with `\n` for new lines.
+
+### Production settings (optional)
+You can configure production defaults in Streamlit secrets:
+
+```
+[production]
+flyash_per_brick = 1.84
+stone_dust_per_brick = 1.38
+contract_rate = 0.0
+```
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.

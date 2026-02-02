@@ -25,8 +25,32 @@ PRODUCTION_COLUMNS = [
     "Actual_Payment_Amount",
 ]
 
-STONE_DUST_PER_BRICK = 1.38
-FLYASH_PER_BRICK = 1.84
+DEFAULT_STONE_DUST_PER_BRICK = 1.38
+DEFAULT_FLYASH_PER_BRICK = 1.84
+
+
+def _get_production_config() -> dict[str, float]:
+    config = st.secrets.get("production", {})
+    flyash_per_brick = utils.safe_float(
+        config.get("flyash_per_brick"),
+        default=DEFAULT_FLYASH_PER_BRICK,
+    )
+    if flyash_per_brick <= 0:
+        flyash_per_brick = DEFAULT_FLYASH_PER_BRICK
+    stone_dust_per_brick = utils.safe_float(
+        config.get("stone_dust_per_brick"),
+        default=DEFAULT_STONE_DUST_PER_BRICK,
+    )
+    if stone_dust_per_brick <= 0:
+        stone_dust_per_brick = DEFAULT_STONE_DUST_PER_BRICK
+    contract_rate = utils.safe_float(config.get("contract_rate"), default=0.0)
+    if contract_rate < 0:
+        contract_rate = 0.0
+    return {
+        "flyash_per_brick": flyash_per_brick,
+        "stone_dust_per_brick": stone_dust_per_brick,
+        "contract_rate": contract_rate,
+    }
 
 
 def _attendance_count(attendance_df, prod_date: date) -> tuple[int, bool]:
@@ -46,6 +70,11 @@ def _attendance_count(attendance_df, prod_date: date) -> tuple[int, bool]:
 def render() -> None:
     st.header("Production Entry")
 
+    production_config = _get_production_config()
+    flyash_per_brick = production_config["flyash_per_brick"]
+    stone_dust_per_brick = production_config["stone_dust_per_brick"]
+    contract_rate_default = production_config["contract_rate"]
+
     labour_df = database.read_table("Labour")
     avg_wage = utils.average_daily_wage(labour_df)
     attendance_df = database.read_table("Labour_Attendance")
@@ -56,7 +85,7 @@ def render() -> None:
             prod_date = st.date_input("Date", value=date.today(), key="production_date")
             no_of_bricks = st.number_input("No of Bricks", min_value=0, step=1)
             cement_consumption = st.number_input("Cement Consumption", min_value=0.0, step=1.0)
-            flyash_consumption = round(no_of_bricks * FLYASH_PER_BRICK, 2)
+            flyash_consumption = round(no_of_bricks * flyash_per_brick, 2)
             st.number_input(
                 "Fly Ash Consumption (auto)",
                 min_value=0.0,
@@ -65,7 +94,7 @@ def render() -> None:
                 format="%.2f",
                 disabled=True,
             )
-            stone_dust_consumption = round(no_of_bricks * STONE_DUST_PER_BRICK, 2)
+            stone_dust_consumption = round(no_of_bricks * stone_dust_per_brick, 2)
             st.number_input(
                 "Stone Dust Consumption (auto)",
                 min_value=0.0,
@@ -76,28 +105,33 @@ def render() -> None:
             )
         with col2:
             attendance_count, has_attendance = _attendance_count(attendance_df, prod_date)
-            if st.session_state.get("production_attendance_date") != prod_date:
-                st.session_state["production_attendance_date"] = prod_date
-                if has_attendance:
-                    st.session_state["production_no_of_labour"] = attendance_count
-            no_of_labour = st.number_input(
-                "No of Labour",
-                min_value=0,
-                step=1,
-                key="production_no_of_labour",
-            )
-            if has_attendance:
-                st.caption(f"Attendance count for date: {attendance_count}")
-            else:
-                st.caption("No attendance logged for this date.")
             labour_basis = st.radio(
                 "Labour Expense Basis",
                 ["Day", "Contract"],
                 horizontal=True,
             )
+            if labour_basis == "Day":
+                if st.session_state.get("production_attendance_date") != prod_date:
+                    st.session_state["production_attendance_date"] = prod_date
+                st.session_state["production_no_of_labour"] = (
+                    attendance_count if has_attendance else 0
+                )
+            no_of_labour = st.number_input(
+                "No of Labour",
+                min_value=0,
+                step=1,
+                key="production_no_of_labour",
+                disabled=labour_basis == "Day",
+            )
+            if labour_basis == "Day":
+                if has_attendance:
+                    st.caption(f"Attendance count for date: {attendance_count}")
+                else:
+                    st.caption("No attendance logged for this date.")
             contract_rate = st.number_input(
                 "Contract Rate (per brick)",
                 min_value=0.0,
+                value=contract_rate_default,
                 step=0.01,
                 disabled=labour_basis != "Contract",
             )
@@ -180,6 +214,18 @@ def render() -> None:
         st.error("Missing Prod_ID column in Production_Log.")
         return
 
+    numeric_columns = [
+        "No_of_Bricks",
+        "Cement_Consumption",
+        "FlyAsh_Consumption",
+        "StoneDust_Consumption",
+        "No_of_Labour",
+        "Contract_Rate",
+        "Labour_Expense",
+        "Actual_Payment_Amount",
+    ]
+    entries = utils.coerce_numeric_columns(entries, numeric_columns)
+
     display_entries = entries.copy()
     display_entries["Delete"] = False
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
@@ -222,8 +268,8 @@ def render() -> None:
         entries.get("StoneDust_Consumption", pd.Series(dtype=float)),
         errors="coerce",
     )
-    expected_flyash = bricks * FLYASH_PER_BRICK
-    expected_stone_dust = bricks * STONE_DUST_PER_BRICK
+    expected_flyash = bricks * flyash_per_brick
+    expected_stone_dust = bricks * stone_dust_per_brick
     invalid_flyash = (flyash - expected_flyash).abs() > 0.01
     invalid_stone_dust = (stone_dust - expected_stone_dust).abs() > 0.01
     mask = utils.apply_invalid_mask(mask, "FlyAsh_Consumption", invalid_flyash)
@@ -248,6 +294,7 @@ def render() -> None:
         )
         if st.button("Save Corrections", key="production_save_corrections"):
             for _, row in edited_invalid.iterrows():
+                row = row.where(pd.notnull(row), "")
                 row_id = str(row.get("Prod_ID", "")).strip()
                 if not row_id:
                     continue

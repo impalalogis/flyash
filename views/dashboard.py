@@ -454,6 +454,15 @@ def render() -> None:
                 "StoneDust_Consumption": "Stone Dust",
             }
         )
+        consumption["Cement"] = utils.to_numeric_series(
+            consumption.get("Cement", pd.Series(dtype=float))
+        ).fillna(0.0)
+        consumption["Fly Ash"] = utils.to_numeric_series(
+            consumption.get("Fly Ash", pd.Series(dtype=float))
+        ).fillna(0.0)
+        consumption["Stone Dust"] = utils.to_numeric_series(
+            consumption.get("Stone Dust", pd.Series(dtype=float))
+        ).fillna(0.0)
         consumption["No_of_Bricks"] = utils.to_numeric_series(
             consumption.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)

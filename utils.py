@@ -36,6 +36,14 @@ def to_numeric_series(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 
+def coerce_numeric_columns(data_frame: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+    data_frame = data_frame.copy()
+    for column in columns:
+        if column in data_frame.columns:
+            data_frame[column] = to_numeric_series(data_frame[column])
+    return data_frame
+
+
 def to_month_string(value: date) -> str:
     return value.strftime("%Y-%m")
 
