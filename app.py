@@ -11,6 +11,7 @@ from views import (
     payments,
     reconciliation,
     stock,
+    weekly_planner,
 )
 
 
@@ -98,6 +99,7 @@ spreadsheet_id = "YOUR_SHEET_ID"
         "Labour Attendance": labour_attendance.render,
         "Stock": stock.render,
         "Reconciliation": reconciliation.render,
+        "Weekly Planner": weekly_planner.render,
         "Master Data": master_data.render,
     }
 
