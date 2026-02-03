@@ -170,6 +170,30 @@ contract_rate = 0.0
 payment_week_range_weeks = 1
 ```
 
+## Dashboard insights (business + technical)
+The Dashboard includes analytics that translate your logs into operational and financial guidance:
+
+**Business insights**
+- Production vs Sales comparisons (monthly/quarterly/yearly), gaps, and conversion ratios.
+- Best & worst months for production, sales, and conversion.
+- Raw material usage trends (cement, fly ash, stone dust) with procurement calendar hints.
+- Cost breakdown (labour, raw materials, freight/transport, maintenance) and cost per brick.
+- Actionable recommendations to improve profit, efficiency, and inventory balance.
+
+**Operational diagnostics**
+- Data anomaly detection: negative stock, sales > production, usage mismatches, sales spikes,
+  and cost spikes with likely causes + corrective actions.
+- Production vs sales days analysis with correlations and outlier months.
+- Profitability trends with profit margin and profit per brick.
+
+**KPI tools**
+- Diagnostic KPI report (like a medical test): current value, ideal range, status,
+  business meaning, and practical steps to improve.
+- KPI dictionary: definitions, why they matter, and target ranges.
+
+Tip: The quality of insights depends on accurate data entry for dates, quantities,
+and costs in the Google Sheets tabs.
+
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.
 2. In "Secrets", paste the same content you would place in
