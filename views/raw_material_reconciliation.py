@@ -211,19 +211,23 @@ def render() -> None:
     flyash_stock_ton = flyash_purchased_ton - flyash_used_ton
     stonedust_stock_ton = stonedust_purchased_ton - stonedust_used_ton
 
-    cement_per_brick = cement_used_kg / bricks_produced if bricks_produced else 0.0
-    flyash_per_brick = flyash_used_kg / bricks_produced if bricks_produced else 0.0
-    stonedust_per_brick = stonedust_used_kg / bricks_produced if bricks_produced else 0.0
-    total_material_per_brick = cement_per_brick + flyash_per_brick + stonedust_per_brick
+    cement_per_brick = cement_used_bags / bricks_produced if bricks_produced else 0.0
+    flyash_per_brick = flyash_used_ton / bricks_produced if bricks_produced else 0.0
+    stonedust_per_brick = stonedust_used_ton / bricks_produced if bricks_produced else 0.0
+    total_material_per_brick = (
+        (cement_used_kg + flyash_used_kg + stonedust_used_kg) / bricks_produced
+        if bricks_produced
+        else 0.0
+    )
 
-    cement_pct = cement_per_brick / total_material_per_brick if total_material_per_brick else 0.0
-    flyash_pct = flyash_per_brick / total_material_per_brick if total_material_per_brick else 0.0
-    stonedust_pct = stonedust_per_brick / total_material_per_brick if total_material_per_brick else 0.0
+    cement_pct = (cement_used_kg / bricks_produced) / total_material_per_brick if total_material_per_brick else 0.0
+    flyash_pct = (flyash_used_kg / bricks_produced) / total_material_per_brick if total_material_per_brick else 0.0
+    stonedust_pct = (stonedust_used_kg / bricks_produced) / total_material_per_brick if total_material_per_brick else 0.0
 
     standard = {
-        "cement": 0.20,
-        "flyash": 1.70,
-        "stone_dust": 1.45,
+        "cement": 0.20 / 50,
+        "flyash": 1.70 / 1000,
+        "stone_dust": 1.45 / 1000,
     }
     cement_variance = cement_per_brick - standard["cement"]
     flyash_variance = flyash_per_brick - standard["flyash"]
@@ -249,15 +253,51 @@ def render() -> None:
     ]
 
     usage_rows = [
-        {"Material": "Cement", "Kg_per_Brick": round(cement_per_brick, 3), "Composition_%": f"{cement_pct:.1%}"},
-        {"Material": "Fly Ash", "Kg_per_Brick": round(flyash_per_brick, 3), "Composition_%": f"{flyash_pct:.1%}"},
-        {"Material": "Stone Dust", "Kg_per_Brick": round(stonedust_per_brick, 3), "Composition_%": f"{stonedust_pct:.1%}"},
+        {
+            "Material": "Cement",
+            "Per_Brick": round(cement_per_brick, 4),
+            "Unit": "bags/brick",
+            "Composition_%": f"{cement_pct:.1%}",
+        },
+        {
+            "Material": "Fly Ash",
+            "Per_Brick": round(flyash_per_brick, 4),
+            "Unit": "tons/brick",
+            "Composition_%": f"{flyash_pct:.1%}",
+        },
+        {
+            "Material": "Stone Dust",
+            "Per_Brick": round(stonedust_per_brick, 4),
+            "Unit": "tons/brick",
+            "Composition_%": f"{stonedust_pct:.1%}",
+        },
     ]
 
     variance_rows = [
-        {"Material": "Cement", "Standard_kg": standard["cement"], "Actual_kg": round(cement_per_brick, 3), "Variance_kg": round(cement_variance, 3), "Variance_%": f"{cement_variance_pct:.1%}"},
-        {"Material": "Fly Ash", "Standard_kg": standard["flyash"], "Actual_kg": round(flyash_per_brick, 3), "Variance_kg": round(flyash_variance, 3), "Variance_%": f"{flyash_variance_pct:.1%}"},
-        {"Material": "Stone Dust", "Standard_kg": standard["stone_dust"], "Actual_kg": round(stonedust_per_brick, 3), "Variance_kg": round(stonedust_variance, 3), "Variance_%": f"{stonedust_variance_pct:.1%}"},
+        {
+            "Material": "Cement",
+            "Standard": round(standard["cement"], 4),
+            "Actual": round(cement_per_brick, 4),
+            "Variance": round(cement_variance, 4),
+            "Variance_%": f"{cement_variance_pct:.1%}",
+            "Unit": "bags/brick",
+        },
+        {
+            "Material": "Fly Ash",
+            "Standard": round(standard["flyash"], 4),
+            "Actual": round(flyash_per_brick, 4),
+            "Variance": round(flyash_variance, 4),
+            "Variance_%": f"{flyash_variance_pct:.1%}",
+            "Unit": "tons/brick",
+        },
+        {
+            "Material": "Stone Dust",
+            "Standard": round(standard["stone_dust"], 4),
+            "Actual": round(stonedust_per_brick, 4),
+            "Variance": round(stonedust_variance, 4),
+            "Variance_%": f"{stonedust_variance_pct:.1%}",
+            "Unit": "tons/brick",
+        },
     ]
 
     physical_rows = []
@@ -313,13 +353,13 @@ def render() -> None:
     st.subheader("System Stock vs Physical Stock")
     st.dataframe(pd.DataFrame(physical_rows), width="stretch")
 
-    st.subheader("Material Usage per Brick (kg)")
+    st.subheader("Material Usage per Brick")
     st.dataframe(pd.DataFrame(usage_rows), width="stretch")
 
     st.subheader("Composition Percentages per Brick")
     st.dataframe(pd.DataFrame(usage_rows)[["Material", "Composition_%"]], width="stretch")
 
-    st.subheader("Standard vs Actual (kg/brick)")
+    st.subheader("Standard vs Actual (per brick)")
     st.dataframe(pd.DataFrame(variance_rows), width="stretch")
 
     st.subheader("Cost per Brick")
@@ -339,10 +379,11 @@ def render() -> None:
             "Purchased_Ton": round(cement_purchased_ton, 2),
             "Used_Ton": round(cement_used_ton, 2),
             "Stock_Ton": round(cement_stock_ton, 2),
-            "Kg_per_Brick": round(cement_per_brick, 3),
+            "Per_Brick": round(cement_per_brick, 4),
+            "Unit": "bags/brick",
             "Percentage": f"{cement_pct:.1%}",
-            "Standard_kg": standard["cement"],
-            "Variance_kg": round(cement_variance, 3),
+            "Standard": round(standard["cement"], 4),
+            "Variance": round(cement_variance, 4),
             "Variance_%": f"{cement_variance_pct:.1%}",
         },
         {
@@ -350,10 +391,11 @@ def render() -> None:
             "Purchased_Ton": round(flyash_purchased_ton, 2),
             "Used_Ton": round(flyash_used_ton, 2),
             "Stock_Ton": round(flyash_stock_ton, 2),
-            "Kg_per_Brick": round(flyash_per_brick, 3),
+            "Per_Brick": round(flyash_per_brick, 4),
+            "Unit": "tons/brick",
             "Percentage": f"{flyash_pct:.1%}",
-            "Standard_kg": standard["flyash"],
-            "Variance_kg": round(flyash_variance, 3),
+            "Standard": round(standard["flyash"], 4),
+            "Variance": round(flyash_variance, 4),
             "Variance_%": f"{flyash_variance_pct:.1%}",
         },
         {
@@ -361,10 +403,11 @@ def render() -> None:
             "Purchased_Ton": round(stonedust_purchased_ton, 2),
             "Used_Ton": round(stonedust_used_ton, 2),
             "Stock_Ton": round(stonedust_stock_ton, 2),
-            "Kg_per_Brick": round(stonedust_per_brick, 3),
+            "Per_Brick": round(stonedust_per_brick, 4),
+            "Unit": "tons/brick",
             "Percentage": f"{stonedust_pct:.1%}",
-            "Standard_kg": standard["stone_dust"],
-            "Variance_kg": round(stonedust_variance, 3),
+            "Standard": round(standard["stone_dust"], 4),
+            "Variance": round(stonedust_variance, 4),
             "Variance_%": f"{stonedust_variance_pct:.1%}",
         },
     ]

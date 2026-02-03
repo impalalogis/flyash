@@ -469,40 +469,40 @@ def render() -> None:
         consumption_period["No_of_Bricks"] = utils.to_numeric_series(
             consumption_period.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
-        consumption_period["Cement_Consumption_kg"] = consumption_period["Cement_Consumption"] * 50
-        consumption_period["FlyAsh_Consumption_kg"] = consumption_period["FlyAsh_Consumption"] * 1000
-        consumption_period["StoneDust_Consumption_kg"] = consumption_period["StoneDust_Consumption"] * 1000
+        consumption_period["Cement_Consumption_bags"] = consumption_period["Cement_Consumption"]
+        consumption_period["FlyAsh_Consumption_tons"] = consumption_period["FlyAsh_Consumption"]
+        consumption_period["StoneDust_Consumption_tons"] = consumption_period["StoneDust_Consumption"]
         consumption_summary = (
             consumption_period.groupby("Period", dropna=False)[
                 [
-                    "Cement_Consumption_kg",
-                    "FlyAsh_Consumption_kg",
-                    "StoneDust_Consumption_kg",
+                    "Cement_Consumption_bags",
+                    "FlyAsh_Consumption_tons",
+                    "StoneDust_Consumption_tons",
                     "No_of_Bricks",
                 ]
             ]
             .sum()
             .reset_index()
         )
-        consumption_summary["Cement_per_1000"] = consumption_summary.apply(
+        consumption_summary["Cement_bags_per_1000"] = consumption_summary.apply(
             lambda row: (
-                row["Cement_Consumption_kg"] / row["No_of_Bricks"] * 1000
+                row["Cement_Consumption_bags"] / row["No_of_Bricks"] * 1000
                 if row["No_of_Bricks"]
                 else 0.0
             ),
             axis=1,
         )
-        consumption_summary["FlyAsh_per_1000"] = consumption_summary.apply(
+        consumption_summary["FlyAsh_tons_per_1000"] = consumption_summary.apply(
             lambda row: (
-                row["FlyAsh_Consumption_kg"] / row["No_of_Bricks"] * 1000
+                row["FlyAsh_Consumption_tons"] / row["No_of_Bricks"] * 1000
                 if row["No_of_Bricks"]
                 else 0.0
             ),
             axis=1,
         )
-        consumption_summary["StoneDust_per_1000"] = consumption_summary.apply(
+        consumption_summary["StoneDust_tons_per_1000"] = consumption_summary.apply(
             lambda row: (
-                row["StoneDust_Consumption_kg"] / row["No_of_Bricks"] * 1000
+                row["StoneDust_Consumption_tons"] / row["No_of_Bricks"] * 1000
                 if row["No_of_Bricks"]
                 else 0.0
             ),
@@ -510,16 +510,23 @@ def render() -> None:
         )
         consumption_melt = consumption_summary.melt(
             id_vars=["Period"],
-            value_vars=["Cement_per_1000", "FlyAsh_per_1000", "StoneDust_per_1000"],
+            value_vars=["Cement_bags_per_1000", "FlyAsh_tons_per_1000", "StoneDust_tons_per_1000"],
             var_name="Material",
             value_name="Per_1000",
+        )
+        consumption_melt["Material"] = consumption_melt["Material"].map(
+            {
+                "Cement_bags_per_1000": "Cement (bags)",
+                "FlyAsh_tons_per_1000": "Fly Ash (tons)",
+                "StoneDust_tons_per_1000": "Stone Dust (tons)",
+            }
         )
         consumption_chart = (
             alt.Chart(consumption_melt)
             .mark_line(point=True)
             .encode(
                 x="Period:O",
-                y=alt.Y("Per_1000:Q", title="Consumption per 1000 Bricks (kg)"),
+                y=alt.Y("Per_1000:Q", title="Consumption per 1000 Bricks"),
                 color="Material",
                 tooltip=["Period", "Material", "Per_1000"],
             )
@@ -626,13 +633,13 @@ def render() -> None:
         )
         consumption["Cement"] = utils.to_numeric_series(
             consumption.get("Cement", pd.Series(dtype=float))
-        ).fillna(0.0) * 50
+        ).fillna(0.0)
         consumption["Fly Ash"] = utils.to_numeric_series(
             consumption.get("Fly Ash", pd.Series(dtype=float))
-        ).fillna(0.0) * 1000
+        ).fillna(0.0)
         consumption["Stone Dust"] = utils.to_numeric_series(
             consumption.get("Stone Dust", pd.Series(dtype=float))
-        ).fillna(0.0) * 1000
+        ).fillna(0.0)
         consumption["No_of_Bricks"] = utils.to_numeric_series(
             consumption.get("No_of_Bricks", pd.Series(dtype=float))
         ).fillna(0.0)
@@ -642,12 +649,19 @@ def render() -> None:
             var_name="Material",
             value_name="Quantity",
         )
+        melt["Material"] = melt["Material"].map(
+            {
+                "Cement": "Cement (bags)",
+                "Fly Ash": "Fly Ash (tons)",
+                "Stone Dust": "Stone Dust (tons)",
+            }
+        )
         line = (
             alt.Chart(melt)
             .mark_line(point=True)
             .encode(
                 x="Date:T",
-                y=alt.Y("Quantity:Q", title="Consumption (kg)"),
+                y=alt.Y("Quantity:Q", title="Consumption (bags / tons)"),
                 color="Material",
                 tooltip=["Date", "Material", "Quantity"],
             )
@@ -901,7 +915,11 @@ def render() -> None:
                     st.dataframe(pd.DataFrame(forecast_rows), width="stretch")
 
                 st.markdown("**Reconciliation snapshot (tons + kg/brick)**")
-                standard = {"Cement": 0.20, "Fly Ash": 1.70, "Stone Dust": 1.45}
+                standard = {
+                    "Cement": 0.20 / 50,
+                    "Fly Ash": 1.70 / 1000,
+                    "Stone Dust": 1.45 / 1000,
+                }
 
                 cement_used_bags = utils.to_numeric_series(
                     production_filtered.get("Cement_Consumption", pd.Series(dtype=float))
@@ -940,12 +958,12 @@ def render() -> None:
 
                 stock_rows = []
                 variance_flags = {}
-                for material, used_kg, purchased_ton, used_ton in [
-                    ("Cement", cement_used_kg, cement_purchased_ton, cement_used_ton),
-                    ("Fly Ash", flyash_used_kg, flyash_purchased_ton, flyash_used_ton),
-                    ("Stone Dust", stonedust_used_kg, stonedust_purchased_ton, stonedust_used_ton),
+                for material, used_value, purchased_ton, used_ton in [
+                    ("Cement", cement_used_bags, cement_purchased_ton, cement_used_ton),
+                    ("Fly Ash", flyash_used_ton, flyash_purchased_ton, flyash_used_ton),
+                    ("Stone Dust", stonedust_used_ton, stonedust_purchased_ton, stonedust_used_ton),
                 ]:
-                    per_brick = used_kg / bricks_produced if bricks_produced else 0.0
+                    per_brick = used_value / bricks_produced if bricks_produced else 0.0
                     variance_pct = (
                         (per_brick - standard[material]) / standard[material]
                         if bricks_produced and standard.get(material, 0)
@@ -956,11 +974,19 @@ def render() -> None:
                         {
                             "Material": material,
                             "Stock_Ton": round(purchased_ton - used_ton, 2),
-                            "Kg_per_Brick": round(per_brick, 3),
+                            "Per_Brick": round(per_brick, 4),
                             "Variance_%": f"{variance_pct:.1%}" if variance_pct is not None else "n/a",
                         }
                     )
-                st.dataframe(pd.DataFrame(stock_rows), width="stretch")
+                stock_df = pd.DataFrame(stock_rows)
+                stock_df["Unit"] = stock_df["Material"].map(
+                    {
+                        "Cement": "bags/brick",
+                        "Fly Ash": "tons/brick",
+                        "Stone Dust": "tons/brick",
+                    }
+                )
+                st.dataframe(stock_df, width="stretch")
 
                 alerts = []
                 for row in stock_rows:
