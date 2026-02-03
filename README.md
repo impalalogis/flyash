@@ -110,6 +110,8 @@ Notes:
 - Contract rate default is configurable via `production.contract_rate`.
 - For Day basis, No_of_Labour is auto-filled from Labour_Attendance for the date.
 - Labour payment date range is configurable via `production.payment_week_range_weeks`.
+- Cement_Consumption is stored in **bags** (50 kg per bag).
+- FlyAsh_Consumption and StoneDust_Consumption are stored in **tons**.
 
 **Sales_Log**
 - Sales_ID
@@ -262,6 +264,10 @@ stock counts and reconciles expected vs actual consumption in **tons**:
 Note: Cement Qty is recorded in **bags** (1 bag = **0.05 tons**). Fly ash and
 stone dust Qty are recorded in **tons**. The app converts quantities to tons
 internally for stock calculations.
+Standard mix reference values (kg/brick) used in diagnostics:
+- Cement: 0.20
+- Fly Ash: 1.70
+- Stone Dust: 1.45
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.

@@ -93,23 +93,27 @@ def render() -> None:
         with col1:
             prod_date = st.date_input("Date", value=date.today(), key="production_date")
             no_of_bricks = st.number_input("No of Bricks", min_value=0, step=1)
-            cement_consumption = st.number_input("Cement Consumption", min_value=0.0, step=1.0)
-            flyash_consumption = round(no_of_bricks * flyash_per_brick, 2)
+            cement_consumption = st.number_input(
+                "Cement Consumption (bags)",
+                min_value=0.0,
+                step=1.0,
+            )
+            flyash_consumption = round(no_of_bricks * flyash_per_brick / 1000, 3)
             st.number_input(
-                "Fly Ash Consumption (auto)",
+                "Fly Ash Consumption (tons, auto)",
                 min_value=0.0,
                 value=flyash_consumption,
-                step=0.01,
-                format="%.2f",
+                step=0.001,
+                format="%.3f",
                 disabled=True,
             )
-            stone_dust_consumption = round(no_of_bricks * stone_dust_per_brick, 2)
+            stone_dust_consumption = round(no_of_bricks * stone_dust_per_brick / 1000, 3)
             st.number_input(
-                "Stone Dust Consumption (auto)",
+                "Stone Dust Consumption (tons, auto)",
                 min_value=0.0,
                 value=stone_dust_consumption,
-                step=0.01,
-                format="%.2f",
+                step=0.001,
+                format="%.3f",
                 disabled=True,
             )
         with col2:
@@ -276,8 +280,8 @@ def render() -> None:
         entries.get("StoneDust_Consumption", pd.Series(dtype=float)),
         errors="coerce",
     )
-    expected_flyash = bricks * flyash_per_brick
-    expected_stone_dust = bricks * stone_dust_per_brick
+    expected_flyash = bricks * flyash_per_brick / 1000
+    expected_stone_dust = bricks * stone_dust_per_brick / 1000
     invalid_flyash = (flyash - expected_flyash).abs() > 0.01
     invalid_stone_dust = (stone_dust - expected_stone_dust).abs() > 0.01
     mask = utils.apply_invalid_mask(mask, "FlyAsh_Consumption", invalid_flyash)

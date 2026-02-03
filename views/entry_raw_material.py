@@ -349,6 +349,9 @@ def render() -> None:
     physical_df["Physical_Stock_Tons"] = utils.to_numeric_series(
         physical_df.get("Physical_Stock_Tons", pd.Series(dtype=float))
     ).fillna(0.0)
+    physical_df["Material"] = physical_df["Material"].astype(str).str.strip().apply(
+        utils.canonical_material_label
+    )
 
     rows = []
     for material in ["Cement", "Fly Ash", "Stone Dust"]:
@@ -356,7 +359,7 @@ def render() -> None:
         system_stock = stock_df[material_mask & (stock_df["Date"] <= latest_date)]
         system_value = system_stock.sort_values("Date").iloc[-1]["Closing"] if not system_stock.empty else 0.0
 
-        physical_mask = physical_df["Material"].astype(str).str.strip().str.lower() == material.lower()
+        physical_mask = physical_df["Material"].astype(str).str.lower() == material.lower()
         physical_stock = physical_df[physical_mask & (physical_df["Date"] <= latest_date)]
         physical_value = (
             physical_stock.sort_values("Date").iloc[-1]["Physical_Stock_Tons"]

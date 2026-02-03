@@ -502,11 +502,23 @@ def generate_invoice_pdf(
     return buffer.read()
 
 
+def canonical_material_label(value: object) -> str:
+    raw = str(value or "").strip()
+    key = re.sub(r"[^a-z]", "", raw.lower())
+    mapping = {
+        "cement": "Cement",
+        "flyash": "Fly Ash",
+        "stonedust": "Stone Dust",
+    }
+    return mapping.get(key, raw)
+
+
 def material_qty_to_tons(material: str, qty: float) -> float:
-    material_value = str(material or "").strip().lower()
-    if material_value == "cement":
+    label = canonical_material_label(material)
+    label_lower = label.lower()
+    if label_lower == "cement":
         return qty * 0.05
-    if material_value in {"fly ash", "stone dust"}:
+    if label_lower in {"fly ash", "stone dust"}:
         return qty
     return 0.0
 
@@ -537,20 +549,25 @@ def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.D
         ["Date", "Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption"],
     )
 
-    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce").dt.date
-    production_df["Date"] = pd.to_datetime(production_df["Date"], errors="coerce").dt.date
+    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
+    production_df["Date"] = pd.to_datetime(
+        production_df["Date"],
+        errors="coerce",
+        dayfirst=True,
+    ).dt.date
     raw_df = raw_df.dropna(subset=["Date"])
     production_df = production_df.dropna(subset=["Date"])
 
-    raw_df["Material"] = raw_df["Material"].astype(str).str.strip()
+    raw_df["Material"] = raw_df["Material"].astype(str).str.strip().apply(
+        canonical_material_label
+    )
     raw_df["Qty"] = pd.to_numeric(raw_df["Qty"], errors="coerce").fillna(0.0)
-    raw_df["Stock_In_Tons"] = _stock_in_tons(raw_df)
 
     inbound = (
-        raw_df.groupby(["Date", "Material"], dropna=False)["Stock_In_Tons"]
+        raw_df.groupby(["Date", "Material"], dropna=False)["Qty"]
         .sum()
         .reset_index()
-        .rename(columns={"Stock_In_Tons": "Inward"})
+        .rename(columns={"Qty": "Inward"})
     )
 
     consumption_rows = []
