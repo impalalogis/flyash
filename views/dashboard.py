@@ -74,6 +74,64 @@ def _period_totals(
     return grouped
 
 
+def _period_day_counts(
+    data_frame: pd.DataFrame,
+    date_col: str,
+    freq: str,
+    label: str,
+    *,
+    filter_column: str | None = None,
+) -> pd.DataFrame:
+    if data_frame.empty or date_col not in data_frame.columns:
+        return pd.DataFrame(columns=["Period", "Period_Label", label])
+    frame = data_frame.copy()
+    if filter_column and filter_column in frame.columns:
+        values = utils.to_numeric_series(frame.get(filter_column, pd.Series(dtype=float))).fillna(0.0)
+        frame = frame[values > 0]
+    dt = pd.to_datetime(frame[date_col], errors="coerce", dayfirst=True)
+    frame["Period"] = dt.dt.to_period(freq)
+    frame = frame[frame["Period"].notna()]
+    frame["DateOnly"] = dt.dt.date
+    grouped = frame.groupby("Period", dropna=False)["DateOnly"].nunique().reset_index()
+    grouped = grouped.rename(columns={"DateOnly": label})
+    grouped = grouped.sort_values("Period")
+    grouped["Period_Label"] = grouped["Period"].apply(lambda value: _period_label(value, freq))
+    return grouped
+
+
+def _period_cost_summary(
+    raw_frame: pd.DataFrame,
+    labour_frame: pd.DataFrame,
+    sales_frame: pd.DataFrame,
+    freq: str,
+) -> pd.DataFrame:
+    raw_cost = _period_totals(raw_frame, "Date", "Total_Cost", freq, "Raw_Cost")
+    labour_cost = _period_totals(labour_frame, "Date", "Labour_Expense", freq, "Labour_Cost")
+    freight_cost = _period_totals(sales_frame, "Date", "Freight", freq, "Freight_Cost")
+    summary = raw_cost[["Period", "Period_Label", "Raw_Cost"]].merge(
+        labour_cost[["Period", "Labour_Cost"]],
+        on="Period",
+        how="left",
+    ).merge(
+        freight_cost[["Period", "Freight_Cost"]],
+        on="Period",
+        how="left",
+    ).fillna(0.0)
+    summary["Total_Cost"] = (
+        summary["Raw_Cost"] + summary["Labour_Cost"] + summary["Freight_Cost"]
+    )
+    return summary
+
+
+def _safe_corr(series_a: pd.Series, series_b: pd.Series) -> float | None:
+    if series_a.empty or series_b.empty or len(series_a) < 2:
+        return None
+    aligned = pd.DataFrame({"a": series_a, "b": series_b}).dropna()
+    if len(aligned) < 2:
+        return None
+    return float(aligned["a"].corr(aligned["b"]))
+
+
 def _latest_change(summary_df: pd.DataFrame, value_col: str) -> dict | None:
     if summary_df.empty or len(summary_df) < 2:
         return None
@@ -667,13 +725,14 @@ def render() -> None:
     if prod_month.empty and sales_month.empty:
         st.info("Add production and sales data to generate insights.")
     else:
-        prod_sales_tab, best_tab, material_tab, cost_tab, anomaly_tab, kpi_tab = st.tabs(
+        prod_sales_tab, best_tab, material_tab, cost_tab, anomaly_tab, days_tab, kpi_tab = st.tabs(
             [
                 "Production vs Sales",
                 "Best & Worst Months",
                 "Materials & Procurement",
                 "Cost Optimization",
                 "Data Anomalies",
+                "Days & Profitability",
                 "KPIs & Recommendations",
             ]
         )
@@ -963,6 +1022,211 @@ def render() -> None:
                 st.dataframe(pd.DataFrame(anomalies), width="stretch")
             else:
                 st.info("No major anomalies detected in the selected range.")
+
+        with days_tab:
+            prod_days_m = _period_day_counts(
+                production_filtered,
+                "Date",
+                "M",
+                "Production_Days",
+                filter_column="No_of_Bricks",
+            )
+            sales_days_m = _period_day_counts(
+                sales_filtered,
+                "Date",
+                "M",
+                "Sales_Days",
+                filter_column="No_of_Bricks",
+            )
+            prod_days_q = _period_day_counts(
+                production_filtered,
+                "Date",
+                "Q",
+                "Production_Days",
+                filter_column="No_of_Bricks",
+            )
+            sales_days_q = _period_day_counts(
+                sales_filtered,
+                "Date",
+                "Q",
+                "Sales_Days",
+                filter_column="No_of_Bricks",
+            )
+            prod_days_y = _period_day_counts(
+                production_filtered,
+                "Date",
+                "Y",
+                "Production_Days",
+                filter_column="No_of_Bricks",
+            )
+            sales_days_y = _period_day_counts(
+                sales_filtered,
+                "Date",
+                "Y",
+                "Sales_Days",
+                filter_column="No_of_Bricks",
+            )
+
+            st.markdown("**Production vs Sales days (monthly)**")
+            days_month = prod_days_m[["Period", "Period_Label", "Production_Days"]].merge(
+                sales_days_m[["Period", "Sales_Days"]],
+                on="Period",
+                how="outer",
+            ).fillna(0.0)
+            days_month["Days_Ratio"] = days_month["Production_Days"].div(
+                days_month["Sales_Days"].replace(0, pd.NA)
+            )
+            st.dataframe(
+                days_month[["Period_Label", "Production_Days", "Sales_Days", "Days_Ratio"]],
+                width="stretch",
+            )
+
+            st.markdown("**Quarterly production vs sales days**")
+            days_quarter = prod_days_q[["Period", "Period_Label", "Production_Days"]].merge(
+                sales_days_q[["Period", "Sales_Days"]],
+                on="Period",
+                how="outer",
+            ).fillna(0.0)
+            days_quarter["Days_Ratio"] = days_quarter["Production_Days"].div(
+                days_quarter["Sales_Days"].replace(0, pd.NA)
+            )
+            st.dataframe(
+                days_quarter[["Period_Label", "Production_Days", "Sales_Days", "Days_Ratio"]],
+                width="stretch",
+            )
+
+            st.markdown("**Yearly production vs sales days**")
+            days_year = prod_days_y[["Period", "Period_Label", "Production_Days"]].merge(
+                sales_days_y[["Period", "Sales_Days"]],
+                on="Period",
+                how="outer",
+            ).fillna(0.0)
+            days_year["Days_Ratio"] = days_year["Production_Days"].div(
+                days_year["Sales_Days"].replace(0, pd.NA)
+            )
+            st.dataframe(
+                days_year[["Period_Label", "Production_Days", "Sales_Days", "Days_Ratio"]],
+                width="stretch",
+            )
+
+            days_month = days_month.merge(
+                monthly_summary[["Period", "Production", "Sales"]],
+                on="Period",
+                how="left",
+            ).fillna(0.0)
+            prod_output_corr = _safe_corr(
+                days_month["Production_Days"],
+                days_month["Production"],
+            )
+            sales_output_corr = _safe_corr(
+                days_month["Sales_Days"],
+                days_month["Sales"],
+            )
+            day_corr = _safe_corr(days_month["Production_Days"], days_month["Sales_Days"])
+
+            st.markdown("**Correlation insights (monthly)**")
+            st.write(
+                {
+                    "Production days vs output": f"{prod_output_corr:.2f}" if prod_output_corr is not None else "n/a",
+                    "Sales days vs sales": f"{sales_output_corr:.2f}" if sales_output_corr is not None else "n/a",
+                    "Production days vs sales days": f"{day_corr:.2f}" if day_corr is not None else "n/a",
+                }
+            )
+
+            low_threshold = days_month["Production_Days"].quantile(0.2) if not days_month.empty else None
+            high_threshold = days_month["Production_Days"].quantile(0.8) if not days_month.empty else None
+            if low_threshold is not None and high_threshold is not None:
+                low_prod = days_month[days_month["Production_Days"] <= low_threshold].head(3)
+                high_prod = days_month[days_month["Production_Days"] >= high_threshold].head(3)
+                st.markdown("**Production days outliers**")
+                st.dataframe(
+                    pd.concat(
+                        [
+                            low_prod.assign(Flag="Low"),
+                            high_prod.assign(Flag="High"),
+                        ],
+                        ignore_index=True,
+                    )[["Period_Label", "Production_Days", "Flag"]],
+                    width="stretch",
+                )
+
+            low_sales_threshold = days_month["Sales_Days"].quantile(0.2) if not days_month.empty else None
+            high_sales_threshold = days_month["Sales_Days"].quantile(0.8) if not days_month.empty else None
+            if low_sales_threshold is not None and high_sales_threshold is not None:
+                low_sales = days_month[days_month["Sales_Days"] <= low_sales_threshold].head(3)
+                high_sales = days_month[days_month["Sales_Days"] >= high_sales_threshold].head(3)
+                st.markdown("**Sales days outliers**")
+                st.dataframe(
+                    pd.concat(
+                        [
+                            low_sales.assign(Flag="Low"),
+                            high_sales.assign(Flag="High"),
+                        ],
+                        ignore_index=True,
+                    )[["Period_Label", "Sales_Days", "Flag"]],
+                    width="stretch",
+                )
+
+            st.markdown("**Profitability trends**")
+            cost_month_summary = _period_cost_summary(raw_filtered, production_filtered, sales_filtered, "M")
+            sales_amount_month = _period_totals(sales_filtered, "Date", "Total_Amount", "M", "Sales_Amount")
+            profit_month = cost_month_summary.merge(
+                sales_amount_month[["Period", "Sales_Amount"]],
+                on="Period",
+                how="left",
+            ).fillna(0.0)
+            prod_bricks_month = _period_totals(production_filtered, "Date", "No_of_Bricks", "M", "Prod_Bricks")
+            profit_month = profit_month.merge(
+                prod_bricks_month[["Period", "Prod_Bricks"]],
+                on="Period",
+                how="left",
+            ).fillna(0.0)
+            profit_month["Profit"] = profit_month["Sales_Amount"] - profit_month["Total_Cost"]
+            profit_month["Profit_Margin"] = profit_month["Profit"].div(
+                profit_month["Sales_Amount"].replace(0, pd.NA)
+            )
+            profit_month["Profit_per_Brick"] = profit_month["Profit"].div(
+                profit_month["Prod_Bricks"].replace(0, pd.NA)
+            )
+            profit_month["Period_Label"] = profit_month["Period"].apply(lambda value: _period_label(value, "M"))
+
+            st.dataframe(
+                profit_month[
+                    [
+                        "Period_Label",
+                        "Sales_Amount",
+                        "Total_Cost",
+                        "Profit",
+                        "Profit_Margin",
+                        "Profit_per_Brick",
+                    ]
+                ],
+                width="stretch",
+            )
+
+            profit_month["Cost_Change"] = profit_month["Total_Cost"].diff()
+            profit_month["Profit_Change"] = profit_month["Profit"].diff()
+            mismatch = profit_month[
+                (profit_month["Cost_Change"] > 0) & (profit_month["Profit_Change"] <= 0)
+            ]
+            if not mismatch.empty:
+                st.markdown("**Cost increased but profit did not**")
+                st.dataframe(
+                    mismatch[["Period_Label", "Cost_Change", "Profit_Change"]],
+                    width="stretch",
+                )
+            else:
+                st.caption("No periods where cost rose while profit fell.")
+
+            st.markdown("**Recommendation on production vs sales days**")
+            if prod_output_corr is not None and prod_output_corr < 0.3:
+                st.write("- Production days are not translating into output. Review downtime and shift utilization.")
+            elif prod_output_corr is not None:
+                st.write("- Increasing production days likely increases output. Plan extra shifts before peak demand.")
+            if sales_output_corr is not None and sales_output_corr < 0.3:
+                st.write("- Sales days are not translating into revenue. Improve lead tracking or customer follow-ups.")
+            elif sales_output_corr is not None:
+                st.write("- Additional sales days are likely to improve revenue. Expand sales coverage in peak months.")
 
         with kpi_tab:
             kpi_rows = []
