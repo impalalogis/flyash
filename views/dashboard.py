@@ -911,17 +911,20 @@ def render() -> None:
                 flyash_used_ton = flyash_used_kg / 1000
                 stonedust_used_ton = stonedust_used_kg / 1000
 
+                raw_filtered["Material"] = raw_filtered["Material"].astype(str).str.strip().apply(
+                    utils.canonical_material_label
+                )
                 cement_purchased_bags = raw_filtered.loc[
-                    raw_filtered["Material"].astype(str).str.strip().str.lower() == "cement",
+                    raw_filtered["Material"].astype(str).str.lower() == "cement",
                     "Qty",
                 ].sum()
                 cement_purchased_ton = (cement_purchased_bags * 50) / 1000
                 flyash_purchased_ton = raw_filtered.loc[
-                    raw_filtered["Material"].astype(str).str.strip().str.lower() == "fly ash",
+                    raw_filtered["Material"].astype(str).str.lower() == "fly ash",
                     "Qty",
                 ].sum()
                 stonedust_purchased_ton = raw_filtered.loc[
-                    raw_filtered["Material"].astype(str).str.strip().str.lower() == "stone dust",
+                    raw_filtered["Material"].astype(str).str.lower() == "stone dust",
                     "Qty",
                 ].sum()
 

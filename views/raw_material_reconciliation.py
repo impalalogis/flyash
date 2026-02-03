@@ -102,6 +102,9 @@ def render() -> None:
     raw_df = utils.ensure_columns(raw_df, ["Date", "Material", "Qty", "Total_Cost"])
     raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
     raw_df["Qty"] = utils.to_numeric_series(raw_df.get("Qty", pd.Series(dtype=float))).fillna(0.0)
+    raw_df["Material"] = raw_df["Material"].astype(str).str.strip().apply(
+        utils.canonical_material_label
+    )
     raw_df["Stock_In_Tons"] = raw_df.apply(
         lambda row: utils.material_qty_to_tons(
             row.get("Material", ""), utils.safe_float(row.get("Qty", 0))
@@ -125,6 +128,9 @@ def render() -> None:
     physical_df["Physical_Stock_Tons"] = utils.to_numeric_series(
         physical_df.get("Physical_Stock_Tons", pd.Series(dtype=float))
     ).fillna(0.0)
+    physical_df["Material"] = physical_df["Material"].astype(str).str.strip().apply(
+        utils.canonical_material_label
+    )
 
     all_dates = pd.concat(
         [
