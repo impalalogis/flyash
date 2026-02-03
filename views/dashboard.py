@@ -635,16 +635,45 @@ def render() -> None:
         ("Other/Unclassified", other_cost),
     ]
     total_cost = sum(value for _, value in cost_rows)
+    raw_cost_month = _period_totals(raw_filtered, "Date", "Total_Cost", "M", "Raw_Cost")
+    labour_cost_month = _period_totals(
+        production_filtered,
+        "Date",
+        "Labour_Expense",
+        "M",
+        "Labour_Cost",
+    )
+    freight_cost_month = _period_totals(sales_filtered, "Date", "Freight", "M", "Freight_Cost")
+    cost_month = prod_month[["Period", "Period_Label", "Production"]].merge(
+        raw_cost_month[["Period", "Raw_Cost"]],
+        on="Period",
+        how="left",
+    ).merge(
+        labour_cost_month[["Period", "Labour_Cost"]],
+        on="Period",
+        how="left",
+    ).merge(
+        freight_cost_month[["Period", "Freight_Cost"]],
+        on="Period",
+        how="left",
+    ).fillna(0.0)
+    cost_month["Total_Cost"] = (
+        cost_month["Raw_Cost"] + cost_month["Labour_Cost"] + cost_month["Freight_Cost"]
+    )
+    cost_month["Cost_per_Brick"] = cost_month["Total_Cost"].div(
+        cost_month["Production"].replace(0, pd.NA)
+    )
 
     if prod_month.empty and sales_month.empty:
         st.info("Add production and sales data to generate insights.")
     else:
-        prod_sales_tab, best_tab, material_tab, cost_tab, kpi_tab = st.tabs(
+        prod_sales_tab, best_tab, material_tab, cost_tab, anomaly_tab, kpi_tab = st.tabs(
             [
                 "Production vs Sales",
                 "Best & Worst Months",
                 "Materials & Procurement",
                 "Cost Optimization",
+                "Data Anomalies",
                 "KPIs & Recommendations",
             ]
         )
@@ -815,40 +844,125 @@ def render() -> None:
             )
             st.dataframe(cost_table, width="stretch")
 
-            raw_cost_month = _period_totals(raw_filtered, "Date", "Total_Cost", "M", "Raw_Cost")
-            labour_cost_month = _period_totals(
-                production_filtered,
-                "Date",
-                "Labour_Expense",
-                "M",
-                "Labour_Cost",
-            )
-            freight_cost_month = _period_totals(sales_filtered, "Date", "Freight", "M", "Freight_Cost")
-            cost_month = prod_month[["Period", "Period_Label", "Production"]].merge(
-                raw_cost_month[["Period", "Raw_Cost"]],
-                on="Period",
-                how="left",
-            ).merge(
-                labour_cost_month[["Period", "Labour_Cost"]],
-                on="Period",
-                how="left",
-            ).merge(
-                freight_cost_month[["Period", "Freight_Cost"]],
-                on="Period",
-                how="left",
-            ).fillna(0.0)
-            cost_month["Total_Cost"] = (
-                cost_month["Raw_Cost"] + cost_month["Labour_Cost"] + cost_month["Freight_Cost"]
-            )
-            cost_month["Cost_per_Brick"] = cost_month["Total_Cost"].div(
-                cost_month["Production"].replace(0, pd.NA)
-            )
             top_cost = cost_month.sort_values("Cost_per_Brick", ascending=False).head(3)
             st.markdown("**Highest cost per brick (monthly)**")
             st.dataframe(
                 top_cost[["Period_Label", "Cost_per_Brick", "Total_Cost"]],
                 width="stretch",
             )
+
+        with anomaly_tab:
+            anomalies: list[dict[str, str]] = []
+
+            if not stock_log.empty:
+                negative_stock = stock_log.loc[stock_log["Closing"] < 0]
+                if not negative_stock.empty:
+                    sample = negative_stock.head(3)
+                    for _, row in sample.iterrows():
+                        anomalies.append(
+                            {
+                                "Type": "Negative stock",
+                                "Period": str(row.get("Date", "")),
+                                "Finding": f"{row.get('Material', '')} closing {row.get('Closing', 0)}",
+                                "Likely cause": "Missing inward entries or over-reported consumption.",
+                                "Corrective action": "Verify stock log vs receipts; add missing inward entries.",
+                                "Preventive measure": "Weekly stock reconciliation and inward checks.",
+                            }
+                        )
+
+            if not monthly_summary.empty:
+                sales_over_prod = monthly_summary[monthly_summary["Sales"] > monthly_summary["Production"]]
+                if not sales_over_prod.empty:
+                    for _, row in sales_over_prod.head(3).iterrows():
+                        anomalies.append(
+                            {
+                                "Type": "Sales > Production",
+                                "Period": row.get("Period_Label", ""),
+                                "Finding": "Sales exceeded production",
+                                "Likely cause": "Old inventory cleared or production missing.",
+                                "Corrective action": "Confirm opening stock and adjust production log.",
+                                "Preventive measure": "Track opening/closing finished goods stock monthly.",
+                            }
+                        )
+
+                sales_spike = monthly_summary.copy()
+                sales_spike["Sales_Change"] = sales_spike["Sales"].pct_change()
+                sales_spike["Prod_Change"] = sales_spike["Production"].pct_change()
+                spike_rows = sales_spike[
+                    (sales_spike["Sales_Change"] > 0.3) & (sales_spike["Prod_Change"] < 0.1)
+                ]
+                for _, row in spike_rows.head(3).iterrows():
+                    anomalies.append(
+                        {
+                            "Type": "Sales spike without production",
+                            "Period": row.get("Period_Label", ""),
+                            "Finding": f"Sales up {row.get('Sales_Change', 0):.0%} while production flat",
+                            "Likely cause": "Inventory clearance or delayed sales posting.",
+                            "Corrective action": "Check inventory dispatch log vs production days.",
+                            "Preventive measure": "Weekly sales-production reconciliation.",
+                        }
+                    )
+
+            if not production_filtered.empty:
+                usage = production_filtered.copy()
+                usage["Period"] = pd.to_datetime(
+                    usage.get("Date", pd.Series(dtype=str)),
+                    errors="coerce",
+                    dayfirst=True,
+                ).dt.to_period("M")
+                usage["No_of_Bricks"] = utils.to_numeric_series(
+                    usage.get("No_of_Bricks", pd.Series(dtype=float))
+                ).fillna(0.0)
+                usage["Material_Total"] = (
+                    utils.to_numeric_series(usage.get("Cement_Consumption", pd.Series(dtype=float))).fillna(0.0)
+                    + utils.to_numeric_series(usage.get("FlyAsh_Consumption", pd.Series(dtype=float))).fillna(0.0)
+                    + utils.to_numeric_series(usage.get("StoneDust_Consumption", pd.Series(dtype=float))).fillna(0.0)
+                )
+                usage_summary = (
+                    usage.groupby("Period", dropna=False)[["No_of_Bricks", "Material_Total"]]
+                    .sum()
+                    .reset_index()
+                    .sort_values("Period")
+                )
+                usage_summary["Material_per_1000"] = usage_summary["Material_Total"].div(
+                    usage_summary["No_of_Bricks"].replace(0, pd.NA)
+                ) * 1000
+                usage_summary["Prod_Change"] = usage_summary["No_of_Bricks"].pct_change().abs()
+                usage_summary["Mat_Change"] = usage_summary["Material_per_1000"].pct_change().abs()
+                mismatch = usage_summary[
+                    (usage_summary["Prod_Change"] < 0.1) & (usage_summary["Mat_Change"] > 0.2)
+                ]
+                for _, row in mismatch.head(3).iterrows():
+                    anomalies.append(
+                        {
+                            "Type": "Material usage mismatch",
+                            "Period": _period_label(row.get("Period"), "M"),
+                            "Finding": "Similar production, different material usage",
+                            "Likely cause": "Wastage, mix changes, or entry errors.",
+                            "Corrective action": "Check mix ratios and validate consumption entries.",
+                            "Preventive measure": "Standardize batching logs per shift.",
+                        }
+                    )
+
+            if not cost_month.empty:
+                threshold = cost_month["Cost_per_Brick"].quantile(0.9)
+                cost_spike = cost_month[cost_month["Cost_per_Brick"] > threshold]
+                for _, row in cost_spike.head(3).iterrows():
+                    anomalies.append(
+                        {
+                            "Type": "Cost spike",
+                            "Period": row.get("Period_Label", ""),
+                            "Finding": f"Cost per brick {row.get('Cost_per_Brick', 0):.2f}",
+                            "Likely cause": "Higher input prices or lower output.",
+                            "Corrective action": "Review procurement prices and downtime logs.",
+                            "Preventive measure": "Lock rates before peak season, track idle time.",
+                        }
+                    )
+
+            if anomalies:
+                st.dataframe(pd.DataFrame(anomalies), width="stretch")
+            else:
+                st.info("No major anomalies detected in the selected range.")
 
         with kpi_tab:
             kpi_rows = []
@@ -903,6 +1017,18 @@ def render() -> None:
                 )
             st.markdown("**Actionable recommendations**")
             st.markdown("\n".join([f"- {item}" for item in recommendations]))
+            st.markdown("**Additional KPIs to track**")
+            st.markdown(
+                "\n".join(
+                    [
+                        "- Customer repeat rate and average order size",
+                        "- Finished goods aging (days of inventory)",
+                        "- Raw material lead time and stockout rate",
+                        "- Machine downtime (hours) and on-time order fulfillment",
+                        "- Working capital cycle (receivables + inventory - payables days)",
+                    ]
+                )
+            )
 
     st.subheader("Customer Outstanding and Stock")
     col1, col2 = st.columns(2)
