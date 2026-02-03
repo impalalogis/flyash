@@ -42,6 +42,62 @@ def _add_period_column(data_frame: pd.DataFrame, column: str, period: str) -> pd
     return data_frame
 
 
+def _period_label(value: pd.Period, freq: str) -> str:
+    if pd.isna(value):
+        return ""
+    if freq == "M":
+        return value.to_timestamp().strftime("%b-%Y")
+    if freq == "Q":
+        return f"{value.year} Q{value.quarter}"
+    return str(value.year)
+
+
+def _period_totals(
+    data_frame: pd.DataFrame,
+    date_col: str,
+    value_col: str,
+    freq: str,
+    label: str,
+) -> pd.DataFrame:
+    if data_frame.empty or date_col not in data_frame.columns:
+        return pd.DataFrame(columns=["Period", "Period_Label", label])
+    frame = data_frame.copy()
+    dt = pd.to_datetime(frame[date_col], errors="coerce", dayfirst=True)
+    frame["Period"] = dt.dt.to_period(freq)
+    frame = frame[frame["Period"].notna()]
+    frame[label] = utils.to_numeric_series(
+        frame.get(value_col, pd.Series(dtype=float))
+    ).fillna(0.0)
+    grouped = frame.groupby("Period", dropna=False)[label].sum().reset_index()
+    grouped = grouped.sort_values("Period")
+    grouped["Period_Label"] = grouped["Period"].apply(lambda value: _period_label(value, freq))
+    return grouped
+
+
+def _latest_change(summary_df: pd.DataFrame, value_col: str) -> dict | None:
+    if summary_df.empty or len(summary_df) < 2:
+        return None
+    current = summary_df.iloc[-1][value_col]
+    previous = summary_df.iloc[-2][value_col]
+    diff = current - previous
+    pct = (diff / previous * 100) if previous else None
+    return {
+        "current": current,
+        "previous": previous,
+        "diff": diff,
+        "pct": pct,
+        "period": summary_df.iloc[-1]["Period_Label"],
+    }
+
+
+def _format_change(change: dict | None) -> str:
+    if not change:
+        return "n/a"
+    pct = change["pct"]
+    pct_str = f"{pct:+.1f}%" if pct is not None else "n/a"
+    return f"{change['current']:,.0f} ({pct_str})"
+
+
 def render() -> None:
     st.header("Dashboard")
 
@@ -534,6 +590,445 @@ def render() -> None:
             .encode(x="Date:T", y="No_of_Bricks:Q", tooltip=["Date", "No_of_Bricks"])
         )
         st.altair_chart((line + bricks).resolve_scale(y="independent"), width="stretch")
+
+    st.subheader("Insights & Recommendations")
+    prod_month = _period_totals(production_filtered, "Date", "No_of_Bricks", "M", "Production")
+    sales_month = _period_totals(sales_filtered, "Date", "No_of_Bricks", "M", "Sales")
+    prod_quarter = _period_totals(production_filtered, "Date", "No_of_Bricks", "Q", "Production")
+    sales_quarter = _period_totals(sales_filtered, "Date", "No_of_Bricks", "Q", "Sales")
+    prod_year = _period_totals(production_filtered, "Date", "No_of_Bricks", "Y", "Production")
+    sales_year = _period_totals(sales_filtered, "Date", "No_of_Bricks", "Y", "Sales")
+
+    monthly_summary = prod_month[["Period", "Period_Label", "Production"]].merge(
+        sales_month[["Period", "Sales"]],
+        on="Period",
+        how="outer",
+    ).fillna(0.0)
+    monthly_summary["Period_Label"] = monthly_summary["Period"].apply(
+        lambda value: _period_label(value, "M")
+    )
+    monthly_summary["Gap"] = monthly_summary["Production"] - monthly_summary["Sales"]
+    monthly_summary["Conversion"] = monthly_summary["Sales"].div(
+        monthly_summary["Production"].replace(0, pd.NA)
+    )
+
+    material_series = raw_filtered.get("Material", pd.Series(dtype=str)).astype(str).str.strip()
+    raw_types = {"Cement", "Fly Ash", "Stone Dust", "Sand"}
+    transport_types = {"Transport", "Diesel"}
+    maintenance_types = {"Maintenance"}
+    raw_cost = raw_filtered.loc[material_series.isin(raw_types), "Total_Cost"].sum()
+    transport_cost = raw_filtered.loc[material_series.isin(transport_types), "Total_Cost"].sum()
+    maintenance_cost = raw_filtered.loc[material_series.isin(maintenance_types), "Total_Cost"].sum()
+    other_cost = raw_filtered.loc[
+        ~material_series.isin(raw_types | transport_types | maintenance_types),
+        "Total_Cost",
+    ].sum()
+    freight_cost = utils.to_numeric_series(
+        sales_filtered.get("Freight", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    cost_rows = [
+        ("Raw materials", raw_cost),
+        ("Labour", total_labour),
+        ("Freight (sales)", freight_cost),
+        ("Transport & Diesel", transport_cost),
+        ("Maintenance", maintenance_cost),
+        ("Other/Unclassified", other_cost),
+    ]
+    total_cost = sum(value for _, value in cost_rows)
+    raw_cost_month = _period_totals(raw_filtered, "Date", "Total_Cost", "M", "Raw_Cost")
+    labour_cost_month = _period_totals(
+        production_filtered,
+        "Date",
+        "Labour_Expense",
+        "M",
+        "Labour_Cost",
+    )
+    freight_cost_month = _period_totals(sales_filtered, "Date", "Freight", "M", "Freight_Cost")
+    cost_month = prod_month[["Period", "Period_Label", "Production"]].merge(
+        raw_cost_month[["Period", "Raw_Cost"]],
+        on="Period",
+        how="left",
+    ).merge(
+        labour_cost_month[["Period", "Labour_Cost"]],
+        on="Period",
+        how="left",
+    ).merge(
+        freight_cost_month[["Period", "Freight_Cost"]],
+        on="Period",
+        how="left",
+    ).fillna(0.0)
+    cost_month["Total_Cost"] = (
+        cost_month["Raw_Cost"] + cost_month["Labour_Cost"] + cost_month["Freight_Cost"]
+    )
+    cost_month["Cost_per_Brick"] = cost_month["Total_Cost"].div(
+        cost_month["Production"].replace(0, pd.NA)
+    )
+
+    if prod_month.empty and sales_month.empty:
+        st.info("Add production and sales data to generate insights.")
+    else:
+        prod_sales_tab, best_tab, material_tab, cost_tab, anomaly_tab, kpi_tab = st.tabs(
+            [
+                "Production vs Sales",
+                "Best & Worst Months",
+                "Materials & Procurement",
+                "Cost Optimization",
+                "Data Anomalies",
+                "KPIs & Recommendations",
+            ]
+        )
+
+        with prod_sales_tab:
+            st.markdown("**Trend comparisons (latest period):**")
+            trend_rows = []
+            for label, prod_df, sales_df in [
+                ("Year-over-Year", prod_year, sales_year),
+                ("Quarter-over-Quarter", prod_quarter, sales_quarter),
+                ("Month-over-Month", prod_month, sales_month),
+            ]:
+                prod_change = _latest_change(prod_df, "Production")
+                sales_change = _latest_change(sales_df, "Sales")
+                gap = None
+                if not prod_df.empty and not sales_df.empty:
+                    gap = prod_df.iloc[-1]["Production"] - sales_df.iloc[-1]["Sales"]
+                trend_rows.append(
+                    {
+                        "Trend": label,
+                        "Production": _format_change(prod_change),
+                        "Sales": _format_change(sales_change),
+                        "Gap (Bricks)": f"{gap:,.0f}" if gap is not None else "n/a",
+                    }
+                )
+            st.dataframe(pd.DataFrame(trend_rows), width="stretch")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Months where production exceeded sales**")
+                over = monthly_summary.sort_values("Gap", ascending=False).head(3)
+                st.dataframe(
+                    over[["Period_Label", "Production", "Sales", "Gap"]],
+                    width="stretch",
+                )
+            with col2:
+                st.markdown("**Months where sales exceeded production**")
+                under = monthly_summary.sort_values("Gap").head(3)
+                st.dataframe(
+                    under[["Period_Label", "Production", "Sales", "Gap"]],
+                    width="stretch",
+                )
+
+            if not monthly_summary.empty and monthly_summary["Conversion"].notna().any():
+                latest_conversion = monthly_summary["Conversion"].dropna().iloc[-1]
+                avg_conversion = monthly_summary["Conversion"].dropna().tail(3).mean()
+                st.caption(
+                    f"Latest conversion ratio: {latest_conversion:.2f} | "
+                    f"Last 3-month avg: {avg_conversion:.2f}"
+                )
+
+        with best_tab:
+            def _best_worst(frame: pd.DataFrame, column: str) -> tuple[pd.Series, pd.Series] | None:
+                series = frame[column].dropna()
+                if series.empty:
+                    return None
+                return frame.loc[series.idxmax()], frame.loc[series.idxmin()]
+
+            rows = []
+            for label, column, fmt in [
+                ("Production (bricks)", "Production", "{:,.0f}"),
+                ("Sales (bricks)", "Sales", "{:,.0f}"),
+                ("Conversion ratio", "Conversion", "{:.2f}"),
+            ]:
+                result = _best_worst(monthly_summary, column)
+                if not result:
+                    continue
+                best, worst = result
+                rows.append(
+                    {
+                        "Metric": label,
+                        "Best Month": best["Period_Label"],
+                        "Best Value": fmt.format(best[column]),
+                        "Worst Month": worst["Period_Label"],
+                        "Worst Value": fmt.format(worst[column]),
+                    }
+                )
+            if rows:
+                st.dataframe(pd.DataFrame(rows), width="stretch")
+            else:
+                st.info("Not enough monthly data to identify best/worst months.")
+
+        with material_tab:
+            consumption = production_filtered.copy()
+            if consumption.empty:
+                st.info("No production data available for material insights.")
+            else:
+                consumption["Period"] = pd.to_datetime(
+                    consumption.get("Date", pd.Series(dtype=str)),
+                    errors="coerce",
+                    dayfirst=True,
+                ).dt.to_period("M")
+                material_cols = {
+                    "Cement_Consumption": "Cement",
+                    "FlyAsh_Consumption": "Fly Ash",
+                    "StoneDust_Consumption": "Stone Dust",
+                }
+                for col in material_cols:
+                    consumption[col] = utils.to_numeric_series(
+                        consumption.get(col, pd.Series(dtype=float))
+                    ).fillna(0.0)
+                consumption["No_of_Bricks"] = utils.to_numeric_series(
+                    consumption.get("No_of_Bricks", pd.Series(dtype=float))
+                ).fillna(0.0)
+                monthly_material = (
+                    consumption.groupby("Period", dropna=False)[list(material_cols.keys()) + ["No_of_Bricks"]]
+                    .sum()
+                    .reset_index()
+                    .sort_values("Period")
+                )
+                monthly_material["Period_Label"] = monthly_material["Period"].apply(
+                    lambda value: _period_label(value, "M")
+                )
+                totals = {
+                    material_cols[key]: float(monthly_material[key].sum())
+                    for key in material_cols
+                    if key in monthly_material.columns
+                }
+                if totals:
+                    top_material = max(totals, key=totals.get)
+                    st.metric("Most used material", top_material, f"{totals[top_material]:,.2f}")
+
+                def _top_months(frame: pd.DataFrame, column: str) -> list[str]:
+                    if frame.empty or column not in frame.columns:
+                        return []
+                    top = frame.sort_values(column, ascending=False).head(3)
+                    return [value for value in top["Period_Label"].tolist() if value]
+
+                procurement_rows = []
+                for col, label in material_cols.items():
+                    peaks = _top_months(monthly_material, col)
+                    procurement_rows.append(
+                        {
+                            "Material": label,
+                            "Peak Months": ", ".join(peaks) if peaks else "n/a",
+                            "Procure Before": ", ".join(peaks) if peaks else "n/a",
+                        }
+                    )
+                st.markdown("**Procurement calendar (based on peak usage)**")
+                st.dataframe(pd.DataFrame(procurement_rows), width="stretch")
+
+                recent_months = monthly_material.tail(3)
+                if not recent_months.empty and recent_months["No_of_Bricks"].sum() > 0:
+                    avg_production = recent_months["No_of_Bricks"].mean()
+                    forecast_rows = []
+                    for col, label in material_cols.items():
+                        ratio = recent_months[col].sum() / recent_months["No_of_Bricks"].sum()
+                        forecast_rows.append(
+                            {
+                                "Material": label,
+                                "Avg per brick": f"{ratio:.4f}",
+                                "Next-month need (est.)": f"{ratio * avg_production:,.2f}",
+                            }
+                        )
+                    st.markdown("**Next-month material requirement (simple forecast)**")
+                    st.dataframe(pd.DataFrame(forecast_rows), width="stretch")
+
+        with cost_tab:
+            cost_table = pd.DataFrame(
+                [
+                    {
+                        "Cost Type": label,
+                        "Amount": value,
+                        "Share": f"{(value / total_cost * 100):.1f}%" if total_cost else "n/a",
+                    }
+                    for label, value in cost_rows
+                ]
+            )
+            st.dataframe(cost_table, width="stretch")
+
+            top_cost = cost_month.sort_values("Cost_per_Brick", ascending=False).head(3)
+            st.markdown("**Highest cost per brick (monthly)**")
+            st.dataframe(
+                top_cost[["Period_Label", "Cost_per_Brick", "Total_Cost"]],
+                width="stretch",
+            )
+
+        with anomaly_tab:
+            anomalies: list[dict[str, str]] = []
+
+            if not stock_log.empty:
+                negative_stock = stock_log.loc[stock_log["Closing"] < 0]
+                if not negative_stock.empty:
+                    sample = negative_stock.head(3)
+                    for _, row in sample.iterrows():
+                        anomalies.append(
+                            {
+                                "Type": "Negative stock",
+                                "Period": str(row.get("Date", "")),
+                                "Finding": f"{row.get('Material', '')} closing {row.get('Closing', 0)}",
+                                "Likely cause": "Missing inward entries or over-reported consumption.",
+                                "Corrective action": "Verify stock log vs receipts; add missing inward entries.",
+                                "Preventive measure": "Weekly stock reconciliation and inward checks.",
+                            }
+                        )
+
+            if not monthly_summary.empty:
+                sales_over_prod = monthly_summary[monthly_summary["Sales"] > monthly_summary["Production"]]
+                if not sales_over_prod.empty:
+                    for _, row in sales_over_prod.head(3).iterrows():
+                        anomalies.append(
+                            {
+                                "Type": "Sales > Production",
+                                "Period": row.get("Period_Label", ""),
+                                "Finding": "Sales exceeded production",
+                                "Likely cause": "Old inventory cleared or production missing.",
+                                "Corrective action": "Confirm opening stock and adjust production log.",
+                                "Preventive measure": "Track opening/closing finished goods stock monthly.",
+                            }
+                        )
+
+                sales_spike = monthly_summary.copy()
+                sales_spike["Sales_Change"] = sales_spike["Sales"].pct_change()
+                sales_spike["Prod_Change"] = sales_spike["Production"].pct_change()
+                spike_rows = sales_spike[
+                    (sales_spike["Sales_Change"] > 0.3) & (sales_spike["Prod_Change"] < 0.1)
+                ]
+                for _, row in spike_rows.head(3).iterrows():
+                    anomalies.append(
+                        {
+                            "Type": "Sales spike without production",
+                            "Period": row.get("Period_Label", ""),
+                            "Finding": f"Sales up {row.get('Sales_Change', 0):.0%} while production flat",
+                            "Likely cause": "Inventory clearance or delayed sales posting.",
+                            "Corrective action": "Check inventory dispatch log vs production days.",
+                            "Preventive measure": "Weekly sales-production reconciliation.",
+                        }
+                    )
+
+            if not production_filtered.empty:
+                usage = production_filtered.copy()
+                usage["Period"] = pd.to_datetime(
+                    usage.get("Date", pd.Series(dtype=str)),
+                    errors="coerce",
+                    dayfirst=True,
+                ).dt.to_period("M")
+                usage["No_of_Bricks"] = utils.to_numeric_series(
+                    usage.get("No_of_Bricks", pd.Series(dtype=float))
+                ).fillna(0.0)
+                usage["Material_Total"] = (
+                    utils.to_numeric_series(usage.get("Cement_Consumption", pd.Series(dtype=float))).fillna(0.0)
+                    + utils.to_numeric_series(usage.get("FlyAsh_Consumption", pd.Series(dtype=float))).fillna(0.0)
+                    + utils.to_numeric_series(usage.get("StoneDust_Consumption", pd.Series(dtype=float))).fillna(0.0)
+                )
+                usage_summary = (
+                    usage.groupby("Period", dropna=False)[["No_of_Bricks", "Material_Total"]]
+                    .sum()
+                    .reset_index()
+                    .sort_values("Period")
+                )
+                usage_summary["Material_per_1000"] = usage_summary["Material_Total"].div(
+                    usage_summary["No_of_Bricks"].replace(0, pd.NA)
+                ) * 1000
+                usage_summary["Prod_Change"] = usage_summary["No_of_Bricks"].pct_change().abs()
+                usage_summary["Mat_Change"] = usage_summary["Material_per_1000"].pct_change().abs()
+                mismatch = usage_summary[
+                    (usage_summary["Prod_Change"] < 0.1) & (usage_summary["Mat_Change"] > 0.2)
+                ]
+                for _, row in mismatch.head(3).iterrows():
+                    anomalies.append(
+                        {
+                            "Type": "Material usage mismatch",
+                            "Period": _period_label(row.get("Period"), "M"),
+                            "Finding": "Similar production, different material usage",
+                            "Likely cause": "Wastage, mix changes, or entry errors.",
+                            "Corrective action": "Check mix ratios and validate consumption entries.",
+                            "Preventive measure": "Standardize batching logs per shift.",
+                        }
+                    )
+
+            if not cost_month.empty:
+                threshold = cost_month["Cost_per_Brick"].quantile(0.9)
+                cost_spike = cost_month[cost_month["Cost_per_Brick"] > threshold]
+                for _, row in cost_spike.head(3).iterrows():
+                    anomalies.append(
+                        {
+                            "Type": "Cost spike",
+                            "Period": row.get("Period_Label", ""),
+                            "Finding": f"Cost per brick {row.get('Cost_per_Brick', 0):.2f}",
+                            "Likely cause": "Higher input prices or lower output.",
+                            "Corrective action": "Review procurement prices and downtime logs.",
+                            "Preventive measure": "Lock rates before peak season, track idle time.",
+                        }
+                    )
+
+            if anomalies:
+                st.dataframe(pd.DataFrame(anomalies), width="stretch")
+            else:
+                st.info("No major anomalies detected in the selected range.")
+
+        with kpi_tab:
+            kpi_rows = []
+            total_labour_days = utils.to_numeric_series(
+                production_filtered.get("No_of_Labour", pd.Series(dtype=float))
+            ).fillna(0.0).sum()
+            bricks_per_labour = (
+                total_production / total_labour_days if total_labour_days else 0.0
+            )
+            cost_per_brick = total_cost / total_production if total_production else 0.0
+            avg_price_per_brick = (
+                total_sales / total_sold_bricks if total_sold_bricks else 0.0
+            )
+            margin_per_brick = avg_price_per_brick - cost_per_brick
+            kpi_rows.extend(
+                [
+                    {"KPI": "Bricks per labour-day", "Value": f"{bricks_per_labour:,.2f}"},
+                    {"KPI": "Cost per brick", "Value": f"{cost_per_brick:,.2f}"},
+                    {"KPI": "Avg selling price per brick", "Value": f"{avg_price_per_brick:,.2f}"},
+                    {"KPI": "Margin per brick", "Value": f"{margin_per_brick:,.2f}"},
+                    {"KPI": "Collection ratio", "Value": f"{collection_ratio:,.1f}%"},
+                ]
+            )
+            st.dataframe(pd.DataFrame(kpi_rows), width="stretch")
+
+            recommendations: list[str] = []
+            if not prod_month.empty and not sales_month.empty:
+                latest_ratio = (
+                    monthly_summary["Conversion"].dropna().iloc[-1]
+                    if monthly_summary["Conversion"].notna().any()
+                    else None
+                )
+                if latest_ratio is not None and latest_ratio < 0.9:
+                    recommendations.append(
+                        "Sales are lagging production in the latest month. Slow production or boost sales to reduce inventory."
+                    )
+                elif latest_ratio is not None and latest_ratio > 1.1:
+                    recommendations.append(
+                        "Sales are ahead of production. Consider increasing output or securing inventory buffers."
+                    )
+            if total_cost and raw_cost / total_cost > 0.6:
+                recommendations.append(
+                    "Raw materials are the largest cost driver. Negotiate supplier rates and lock pricing ahead of peak months."
+                )
+            if labour_per_1000 > 0:
+                recommendations.append(
+                    f"Labour cost per 1000 bricks is {labour_per_1000:,.2f}. Monitor labour allocation and reduce idle time."
+                )
+            if not recommendations:
+                recommendations.append(
+                    "Maintain consistent production planning and review raw material wastage monthly."
+                )
+            st.markdown("**Actionable recommendations**")
+            st.markdown("\n".join([f"- {item}" for item in recommendations]))
+            st.markdown("**Additional KPIs to track**")
+            st.markdown(
+                "\n".join(
+                    [
+                        "- Customer repeat rate and average order size",
+                        "- Finished goods aging (days of inventory)",
+                        "- Raw material lead time and stockout rate",
+                        "- Machine downtime (hours) and on-time order fulfillment",
+                        "- Working capital cycle (receivables + inventory - payables days)",
+                    ]
+                )
+            )
 
     st.subheader("Customer Outstanding and Stock")
     col1, col2 = st.columns(2)
