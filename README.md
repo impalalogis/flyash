@@ -110,6 +110,8 @@ Notes:
 - Contract rate default is configurable via `production.contract_rate`.
 - For Day basis, No_of_Labour is auto-filled from Labour_Attendance for the date.
 - Labour payment date range is configurable via `production.payment_week_range_weeks`.
+- Cement_Consumption is stored in **bags** (50 kg per bag).
+- FlyAsh_Consumption and StoneDust_Consumption are stored in **tons**.
 
 **Sales_Log**
 - Sales_ID

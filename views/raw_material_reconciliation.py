@@ -174,17 +174,17 @@ def render() -> None:
     cement_used_bags = utils.to_numeric_series(
         production_window.get("Cement_Consumption", pd.Series(dtype=float))
     ).fillna(0.0).sum()
-    flyash_used_kg = utils.to_numeric_series(
+    flyash_used_ton = utils.to_numeric_series(
         production_window.get("FlyAsh_Consumption", pd.Series(dtype=float))
     ).fillna(0.0).sum()
-    stonedust_used_kg = utils.to_numeric_series(
+    stonedust_used_ton = utils.to_numeric_series(
         production_window.get("StoneDust_Consumption", pd.Series(dtype=float))
     ).fillna(0.0).sum()
 
     cement_used_kg = cement_used_bags * 50
     cement_used_ton = cement_used_kg / 1000
-    flyash_used_ton = flyash_used_kg / 1000
-    stonedust_used_ton = stonedust_used_kg / 1000
+    flyash_used_kg = flyash_used_ton * 1000
+    stonedust_used_kg = stonedust_used_ton * 1000
 
     cement_purchased_bags = raw_df.loc[
         (raw_df["Date"] >= start_date)
