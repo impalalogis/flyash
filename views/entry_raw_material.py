@@ -53,7 +53,6 @@ RAW_MATERIAL_COLUMNS = [
     "Vehicle_Charge",
     "Freight",
     "Material_Rate",
-    "Stock_In_Tons",
 ]
 
 
@@ -98,7 +97,7 @@ def render() -> None:
             )
             material = st.selectbox("Material", MATERIAL_TYPES, index=material_index)
             if material == "Cement":
-                st.caption("Cement Qty is in bags (1 bag = 0.025 tons).")
+                st.caption("Cement Qty is in bags (1 bag = 0.05 tons).")
             elif material in {"Fly Ash", "Stone Dust"}:
                 st.caption("Qty is in tons for Fly Ash and Stone Dust.")
             qty = st.number_input("Quantity", min_value=0.0, step=1.0)
@@ -126,13 +125,9 @@ def render() -> None:
             vehicle_charge=vehicle_charge,
             freight=freight,
         )
-        stock_in_tons = utils.material_qty_to_tons(material, qty)
-
         st.markdown("**Calculated Costs**")
         st.write(f"Material Rate: {material_rate:,.2f}")
         st.write(f"Total Cost: {total_cost:,.2f}")
-        if material in {"Cement", "Fly Ash", "Stone Dust"}:
-            st.write(f"Stock in tons: {stock_in_tons:,.3f}")
 
         submitted = st.form_submit_button("Save Entry")
 
@@ -177,7 +172,6 @@ def render() -> None:
                 "Vehicle_Charge": vehicle_charge,
                 "Freight": freight,
                 "Material_Rate": material_rate,
-                "Stock_In_Tons": stock_in_tons,
             }
             data = {key: data.get(key, "") for key in RAW_MATERIAL_COLUMNS}
             database.insert_row("Raw_Material_Log", data)
@@ -205,7 +199,6 @@ def render() -> None:
         "Vehicle_Charge",
         "Freight",
         "Material_Rate",
-        "Stock_In_Tons",
     ]
     entries = utils.coerce_numeric_columns(entries, numeric_columns)
 
@@ -246,7 +239,6 @@ def render() -> None:
         "Vehicle_Charge": {"numeric": True, "min": 0},
         "Freight": {"numeric": True, "min": 0},
         "Material_Rate": {"numeric": True, "min": 0},
-        "Stock_In_Tons": {"numeric": True, "min": 0},
     }
     mask, errors = utils.build_validation_mask(entries, rules)
     qty = pd.to_numeric(entries.get("Qty", pd.Series(dtype=float)), errors="coerce")
@@ -270,21 +262,10 @@ def render() -> None:
     calc_total_cost = (
         calc_material_rate + gst + route + diesel + driver + vehicle + freight_val
     )
-    material_series = entries.get("Material", pd.Series(dtype=str)).astype(str).str.strip()
-    calc_stock_in_tons = material_series.combine(
-        qty.fillna(0.0),
-        lambda material, qty_val: utils.material_qty_to_tons(material, utils.safe_float(qty_val)),
-    )
-    stock_in_tons = pd.to_numeric(
-        entries.get("Stock_In_Tons", pd.Series(dtype=float)),
-        errors="coerce",
-    )
     invalid_material_rate = (material_rate - calc_material_rate).abs() > 0.01
     invalid_total_cost = (total_cost - calc_total_cost).abs() > 0.01
-    invalid_stock_tons = (stock_in_tons - calc_stock_in_tons).abs() > 0.01
     mask = utils.apply_invalid_mask(mask, "Material_Rate", invalid_material_rate)
     mask = utils.apply_invalid_mask(mask, "Total_Cost", invalid_total_cost)
-    mask = utils.apply_invalid_mask(mask, "Stock_In_Tons", invalid_stock_tons)
 
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
@@ -322,14 +303,12 @@ def render() -> None:
                     vehicle_charge=vehicle_val,
                     freight=freight_val,
                 )
-                stock_in_tons_val = utils.material_qty_to_tons(material, qty_val)
                 entry_date = _parse_date(row.get("Date", ""))
                 if entry_date:
                     row["Year"] = entry_date.strftime("%Y")
                     row["Month"] = utils.to_month_string(entry_date)
                 row["Material_Rate"] = material_rate_val
                 row["Total_Cost"] = total_cost_val
-                row["Stock_In_Tons"] = stock_in_tons_val
                 database.update_row(
                     "Raw_Material_Log",
                     row_id,
