@@ -278,16 +278,18 @@ def render() -> None:
     production_days = (
         production_filtered["Date"].dropna().nunique() if not production_filtered.empty else 0
     )
+    production_entries = len(production_filtered) if not production_filtered.empty else 0
     total_capacity = production_days * daily_capacity if daily_capacity else 0
     capacity_utilization = (
         (total_production / total_capacity * 100) if total_capacity else 0.0
     )
-    metric10, metric11 = st.columns(2)
-    metric10.metric("Production Days", f"{production_days}")
+    metric10, metric11, metric12 = st.columns(3)
+    metric10.metric("Production Entries", f"{production_entries}")
+    metric11.metric("Production Days", f"{production_days}")
     if daily_capacity:
-        metric11.metric("Capacity Utilization", f"{capacity_utilization:,.1f}%")
+        metric12.metric("Capacity Utilization", f"{capacity_utilization:,.1f}%")
     else:
-        metric11.metric("Capacity Utilization", "Set capacity")
+        metric12.metric("Capacity Utilization", "Set capacity")
 
     st.subheader("Period Performance")
     if sales_filtered.empty and raw_filtered.empty and production_filtered.empty:
