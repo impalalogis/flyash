@@ -18,6 +18,9 @@ Create a Google Sheet and add the following tabs (case-sensitive):
 - `Sales_Log`
 - `Payments`
 - `Bank_Statement`
+- `Work_Week`
+- `Holidays`
+- `Planning_Config`
 - `Daily_Summary` (optional)
 
 ### 2) Add headers to each tab
@@ -145,6 +148,27 @@ Notes:
 - Reference
 - Counterparty
 
+**Work_Week**
+- Week_Start
+- Week_End
+- Total_Days
+
+**Holidays**
+- Date
+- Name
+
+**Planning_Config**
+- Key
+- Value
+- Notes
+
+Suggested keys:
+- history_window_days
+- min_target_pct / ideal_target_pct / stretch_target_pct
+- buffer_pct
+- cement_per_brick / flyash_per_brick / stone_dust_per_brick
+- electricity_per_week / transport_per_week / maintenance_per_week / misc_per_week
+
 **Daily_Summary (optional)**
 - Date
 - Total_Production
@@ -211,6 +235,15 @@ supplier payments. To use it:
 - Maintain the `Bank_Statement` tab and keep narration/reference accurate.
 - Use invoice numbers in bank narration for faster matching.
 - Reconcile weekly to catch missing or duplicate entries early.
+
+## Weekly planner
+The **Weekly Planner** page uses Work_Week, Holidays, and Planning_Config to
+produce a weekly production, procurement, sales, and budget plan:
+- Available production days (holiday-adjusted).
+- Minimum/ideal/stretch production targets based on historical averages.
+- Raw material requirements vs current stock and purchase timing.
+- Weekly sales targets based on velocity + inventory.
+- Weekly budget with expected revenue and profit.
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.
