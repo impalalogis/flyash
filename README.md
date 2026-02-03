@@ -17,6 +17,7 @@ Create a Google Sheet and add the following tabs (case-sensitive):
 - `Production_Log`
 - `Sales_Log`
 - `Payments`
+- `Bank_Statement`
 - `Daily_Summary` (optional)
 
 ### 2) Add headers to each tab
@@ -134,6 +135,16 @@ Notes:
 - Mode
 - Payment_Status
 
+**Bank_Statement**
+- Txn_ID
+- Date
+- Narration
+- Debit
+- Credit
+- Balance
+- Reference
+- Counterparty
+
 **Daily_Summary (optional)**
 - Date
 - Total_Production
@@ -193,6 +204,13 @@ The Dashboard includes analytics that translate your logs into operational and f
 
 Tip: The quality of insights depends on accurate data entry for dates, quantities,
 and costs in the Google Sheets tabs.
+
+## Bank reconciliation
+The **Reconciliation** page matches bank credits/debits with sales invoices and
+supplier payments. To use it:
+- Maintain the `Bank_Statement` tab and keep narration/reference accurate.
+- Use invoice numbers in bank narration for faster matching.
+- Reconcile weekly to catch missing or duplicate entries early.
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.
