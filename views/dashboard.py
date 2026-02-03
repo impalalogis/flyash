@@ -1252,6 +1252,199 @@ def render() -> None:
             )
             st.dataframe(pd.DataFrame(kpi_rows), width="stretch")
 
+            conversion_ratio = (
+                total_sold_bricks / total_production if total_production else None
+            )
+            profit = total_sales - total_cost
+            profit_margin = (profit / total_sales) if total_sales else None
+            labour_cost_share = (total_labour / total_cost) if total_cost else None
+            raw_cost_share = (total_raw_cost / total_cost) if total_cost else None
+
+            def _status(value: float | None, low: float, high: float) -> str:
+                if value is None or pd.isna(value):
+                    return "n/a"
+                if value < low:
+                    return "Low"
+                if value > high:
+                    return "High"
+                return "Normal"
+
+            def _format_value(value: float | None, fmt: str) -> str:
+                if value is None or pd.isna(value):
+                    return "n/a"
+                return fmt.format(value)
+
+            kpi_specs = [
+                {
+                    "name": "Production to sales ratio",
+                    "value": conversion_ratio,
+                    "low": 0.9,
+                    "high": 1.1,
+                    "format": "{:.2f}",
+                    "definition": "Sales bricks divided by production bricks.",
+                    "range": "0.90 - 1.10",
+                    "why": "Shows if output matches demand and inventory levels.",
+                    "meaning": {
+                        "Low": "Production is ahead of sales; inventory is building.",
+                        "Normal": "Production and sales are balanced.",
+                        "High": "Sales exceed production; risk of stockouts or missing logs.",
+                    },
+                    "improve": {
+                        "Low": "Slow production, increase sales focus, or clear inventory.",
+                        "High": "Increase production days or verify production logging.",
+                        "Normal": "Maintain balance with monthly review.",
+                    },
+                },
+                {
+                    "name": "Collection ratio",
+                    "value": collection_ratio / 100,
+                    "low": 0.95,
+                    "high": 1.0,
+                    "format": "{:.1%}",
+                    "definition": "Amount received divided by total sales.",
+                    "range": "95% - 100%",
+                    "why": "Tracks cash recovery and receivables health.",
+                    "meaning": {
+                        "Low": "Receivables are high; cash flow risk.",
+                        "Normal": "Collections are healthy.",
+                        "High": "Collections exceed sales; check adjustments.",
+                    },
+                    "improve": {
+                        "Low": "Tighten credit limits and follow-up schedule.",
+                        "High": "Verify entries and reconcile receipts.",
+                        "Normal": "Maintain collection discipline.",
+                    },
+                },
+                {
+                    "name": "Profit margin",
+                    "value": profit_margin,
+                    "low": 0.1,
+                    "high": 0.25,
+                    "format": "{:.1%}",
+                    "definition": "Profit divided by total sales.",
+                    "range": "10% - 25%",
+                    "why": "Shows overall profitability after costs.",
+                    "meaning": {
+                        "Low": "Costs or pricing reduce profitability.",
+                        "Normal": "Profitability is within target range.",
+                        "High": "Strong margin; verify costing accuracy.",
+                    },
+                    "improve": {
+                        "Low": "Negotiate raw material rates and reduce wastage.",
+                        "High": "Recheck cost capture and maintain pricing discipline.",
+                        "Normal": "Sustain process control and pricing.",
+                    },
+                },
+                {
+                    "name": "Labour cost share",
+                    "value": labour_cost_share,
+                    "low": 0.15,
+                    "high": 0.35,
+                    "format": "{:.1%}",
+                    "definition": "Labour cost divided by total cost.",
+                    "range": "15% - 35%",
+                    "why": "Indicates labour efficiency and staffing balance.",
+                    "meaning": {
+                        "Low": "Labour costs are low or under-reported.",
+                        "Normal": "Labour cost share is balanced.",
+                        "High": "Labour cost is heavy; efficiency may be low.",
+                    },
+                    "improve": {
+                        "Low": "Validate labour entries and attendance.",
+                        "High": "Optimize shifts and reduce idle time.",
+                        "Normal": "Keep tracking attendance and output per worker.",
+                    },
+                },
+                {
+                    "name": "Raw material cost share",
+                    "value": raw_cost_share,
+                    "low": 0.5,
+                    "high": 0.7,
+                    "format": "{:.1%}",
+                    "definition": "Raw material cost divided by total cost.",
+                    "range": "50% - 70%",
+                    "why": "Shows procurement impact on total cost.",
+                    "meaning": {
+                        "Low": "Raw material share is low; check if costs are missing.",
+                        "Normal": "Raw material cost share is expected.",
+                        "High": "Raw materials dominate; pricing or wastage issues.",
+                    },
+                    "improve": {
+                        "Low": "Verify raw material entries and pricing.",
+                        "High": "Negotiate rates and reduce material wastage.",
+                        "Normal": "Lock rates before peak months.",
+                    },
+                },
+                {
+                    "name": "Bricks per labour-day",
+                    "value": bricks_per_labour,
+                    "low": 800,
+                    "high": 2000,
+                    "format": "{:,.0f}",
+                    "definition": "Total bricks divided by total labour-days.",
+                    "range": "800 - 2000",
+                    "why": "Indicates labour productivity.",
+                    "meaning": {
+                        "Low": "Productivity is low; labour under-utilized.",
+                        "Normal": "Productivity is within target range.",
+                        "High": "High productivity; check quality and fatigue.",
+                    },
+                    "improve": {
+                        "Low": "Align staffing to demand and improve workflow.",
+                        "High": "Sustain output while monitoring quality.",
+                        "Normal": "Maintain training and batching discipline.",
+                    },
+                },
+                {
+                    "name": "Capacity utilization",
+                    "value": capacity_utilization / 100 if daily_capacity else None,
+                    "low": 0.7,
+                    "high": 0.9,
+                    "format": "{:.1%}",
+                    "definition": "Actual output divided by planned capacity.",
+                    "range": "70% - 90%",
+                    "why": "Shows if capacity is well used.",
+                    "meaning": {
+                        "Low": "Capacity under-utilized; demand or downtime issue.",
+                        "Normal": "Capacity is used efficiently.",
+                        "High": "Running near full capacity; risk of burnout.",
+                    },
+                    "improve": {
+                        "Low": "Improve demand planning or reduce downtime.",
+                        "High": "Plan maintenance and secure raw materials.",
+                        "Normal": "Maintain balanced production planning.",
+                    },
+                },
+            ]
+
+            diagnostic_rows = []
+            for kpi in kpi_specs:
+                status = _status(kpi["value"], kpi["low"], kpi["high"])
+                diagnostic_rows.append(
+                    {
+                        "KPI": kpi["name"],
+                        "Value": _format_value(kpi["value"], kpi["format"]),
+                        "Ideal Range": kpi["range"],
+                        "Status": status,
+                        "What it means": kpi["meaning"].get(status, "n/a"),
+                        "How to improve": kpi["improve"].get(status, "n/a"),
+                    }
+                )
+            st.markdown("**Diagnostic KPI report**")
+            st.dataframe(pd.DataFrame(diagnostic_rows), width="stretch")
+
+            kpi_dictionary = [
+                {
+                    "KPI": kpi["name"],
+                    "Definition": kpi["definition"],
+                    "Ideal Range": kpi["range"],
+                    "Why it matters": kpi["why"],
+                }
+                for kpi in kpi_specs
+            ]
+            st.markdown("**KPI dictionary**")
+            st.dataframe(pd.DataFrame(kpi_dictionary), width="stretch")
+
             recommendations: list[str] = []
             if not prod_month.empty and not sales_month.empty:
                 latest_ratio = (
