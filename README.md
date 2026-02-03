@@ -21,6 +21,7 @@ Create a Google Sheet and add the following tabs (case-sensitive):
 - `Work_Week`
 - `Holidays`
 - `Planning_Config`
+- `Physical_Stock_Log`
 - `Daily_Summary` (optional)
 
 ### 2) Add headers to each tab
@@ -68,12 +69,15 @@ Add the following header row (row 1) for each tab:
 **Raw_Material_Log**
 - RM_ID
 - Date
+- Year
 - Month
 - Supplier_ID
 - Material
 - Qty
 - Rate
 - GST
+- Total_Cost
+- Amount_Paid
 - Vehicle_No
 - Trip_Days
 - Route_Expenses
@@ -81,9 +85,8 @@ Add the following header row (row 1) for each tab:
 - Driver_Salary
 - Vehicle_Charge
 - Freight
-- Amount_Paid
 - Material_Rate
-- Total_Cost
+- Stock_In_Tons
 
 **Production_Log**
 - Prod_ID
@@ -147,6 +150,12 @@ Notes:
 - Balance
 - Reference
 - Counterparty
+
+**Physical_Stock_Log**
+- Date
+- Material
+- Physical_Stock_Tons
+- Notes
 
 **Work_Week**
 - Week_Start
@@ -244,6 +253,13 @@ produce a weekly production, procurement, sales, and budget plan:
 - Raw material requirements vs current stock and purchase timing.
 - Weekly sales targets based on velocity + inventory.
 - Weekly budget with expected revenue and profit.
+
+## Raw material reconciliation
+The **Raw Material Reconciliation** page compares system stock with physical
+stock counts and reconciles expected vs actual consumption in **tons**:
+- System stock vs Physical_Stock_Log (variance and % variance).
+- Expected usage vs actual usage for cement, fly ash, and stone dust.
+- Material cost per brick and variance alerts (overconsumption, high variance).
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.
