@@ -93,14 +93,35 @@ def _get_header(worksheet: gspread.Worksheet) -> list[str]:
     return header
 
 
+def _safe_header(raw_header: list[str], data_rows: list[list[str]]) -> list[str]:
+    max_len = max([len(raw_header)] + [len(row) for row in data_rows] + [0])
+    header = raw_header + [""] * (max_len - len(raw_header))
+    seen: dict[str, int] = {}
+    safe: list[str] = []
+    for idx, value in enumerate(header, start=1):
+        base = str(value).strip() or f"Column_{idx}"
+        count = seen.get(base, 0) + 1
+        seen[base] = count
+        name = base if count == 1 else f"{base}_{count}"
+        safe.append(name)
+    return safe
+
+
 @st.cache_data(ttl=READ_CACHE_TTL, show_spinner=False)
 def _read_table_cached(table_name: str, spreadsheet_id: str) -> pd.DataFrame:
     worksheet = _get_worksheet(table_name)
-    records = worksheet.get_all_records()
-    if not records:
+    rows = worksheet.get_all_values()
+    if not rows:
         header = worksheet.row_values(1)
         return pd.DataFrame(columns=header)
-    return pd.DataFrame(records)
+    raw_header = rows[0]
+    data_rows = rows[1:]
+    if not data_rows:
+        return pd.DataFrame(columns=_safe_header(raw_header, data_rows))
+    header = _safe_header(raw_header, data_rows)
+    max_len = len(header)
+    padded_rows = [row + [""] * (max_len - len(row)) for row in data_rows]
+    return pd.DataFrame(padded_rows, columns=header)
 
 
 def read_table(table_name: str) -> pd.DataFrame:
