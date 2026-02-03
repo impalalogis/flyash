@@ -258,22 +258,33 @@ def render() -> None:
         sales_filtered.get("Amount_Received", pd.Series(dtype=float))
     ).fillna(0.0).sum()
 
-    metric1, metric2, metric3, metric4, metric5 = st.columns(5)
+    current_inventory = (
+        utils.to_numeric_series(
+            production_filtered.get("No_of_Bricks", pd.Series(dtype=float))
+        ).fillna(0.0).sum()
+        - utils.to_numeric_series(
+            sales_filtered.get("No_of_Bricks", pd.Series(dtype=float))
+        ).fillna(0.0).sum()
+    )
+    current_inventory = max(current_inventory, 0.0)
+
+    metric1, metric2, metric3, metric4, metric5, metric6 = st.columns(6)
     metric1.metric("Total Production", f"{total_production:,.0f}")
     metric2.metric("Total Sales", f"{total_sales:,.2f}")
     metric3.metric("Raw Material Cost", f"{total_raw_cost:,.2f}")
     metric4.metric("Labour Cost", f"{total_labour:,.2f}")
     metric5.metric("Profit", f"{profit:,.2f}")
+    metric6.metric("Available Brick Stock", f"{current_inventory:,.0f}")
 
-    metric6, metric7, metric8, metric9 = st.columns(4)
+    metric7, metric8, metric9, metric10 = st.columns(4)
     avg_price = (total_sales / total_sold_bricks) if total_sold_bricks else 0.0
     labour_per_1000 = (total_labour / total_production * 1000) if total_production else 0.0
     material_per_1000 = (total_raw_cost / total_production * 1000) if total_production else 0.0
     collection_ratio = (total_received / total_sales * 100) if total_sales else 0.0
-    metric6.metric("Avg Selling Price", f"{avg_price:,.2f}")
-    metric7.metric("Labour/1000 Bricks", f"{labour_per_1000:,.2f}")
-    metric8.metric("Material/1000 Bricks", f"{material_per_1000:,.2f}")
-    metric9.metric("Collection Ratio", f"{collection_ratio:,.1f}%")
+    metric7.metric("Avg Selling Price", f"{avg_price:,.2f}")
+    metric8.metric("Labour/1000 Bricks", f"{labour_per_1000:,.2f}")
+    metric9.metric("Material/1000 Bricks", f"{material_per_1000:,.2f}")
+    metric10.metric("Collection Ratio", f"{collection_ratio:,.1f}%")
 
     production_days = (
         production_filtered["Date"].dropna().nunique() if not production_filtered.empty else 0
