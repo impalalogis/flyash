@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
 
 import database
 import utils
+
+
+def _parse_date(value: object) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if value in ("", None):
+        return None
+    try:
+        return pd.to_datetime(str(value), errors="coerce", dayfirst=True).date()
+    except Exception:
+        return None
 
 
 MATERIAL_TYPES = [
@@ -23,12 +36,15 @@ MATERIAL_TYPES = [
 RAW_MATERIAL_COLUMNS = [
     "RM_ID",
     "Date",
+    "Year",
     "Month",
     "Supplier_ID",
     "Material",
     "Qty",
     "Rate",
     "GST",
+    "Total_Cost",
+    "Amount_Paid",
     "Vehicle_No",
     "Trip_Days",
     "Route_Expenses",
@@ -36,9 +52,8 @@ RAW_MATERIAL_COLUMNS = [
     "Driver_Salary",
     "Vehicle_Charge",
     "Freight",
-    "Amount_Paid",
     "Material_Rate",
-    "Total_Cost",
+    "Stock_In_Tons",
 ]
 
 
@@ -82,6 +97,10 @@ def render() -> None:
                 else 0
             )
             material = st.selectbox("Material", MATERIAL_TYPES, index=material_index)
+            if material == "Cement":
+                st.caption("Cement Qty is in bags (1 bag = 0.025 tons).")
+            elif material in {"Fly Ash", "Stone Dust"}:
+                st.caption("Qty is in tons for Fly Ash and Stone Dust.")
             qty = st.number_input("Quantity", min_value=0.0, step=1.0)
             rate = st.number_input("Rate", min_value=0.0, step=1.0)
         with col2:
@@ -107,10 +126,13 @@ def render() -> None:
             vehicle_charge=vehicle_charge,
             freight=freight,
         )
+        stock_in_tons = utils.material_qty_to_tons(material, qty)
 
         st.markdown("**Calculated Costs**")
         st.write(f"Material Rate: {material_rate:,.2f}")
         st.write(f"Total Cost: {total_cost:,.2f}")
+        if material in {"Cement", "Fly Ash", "Stone Dust"}:
+            st.write(f"Stock in tons: {stock_in_tons:,.3f}")
 
         submitted = st.form_submit_button("Save Entry")
 
@@ -138,12 +160,15 @@ def render() -> None:
             data = {
                 "RM_ID": rm_id,
                 "Date": material_date.isoformat(),
+                "Year": material_date.strftime("%Y"),
                 "Month": utils.to_month_string(material_date),
                 "Supplier_ID": supplier_id,
                 "Material": material,
                 "Qty": qty,
                 "Rate": rate,
                 "GST": gst,
+                "Total_Cost": total_cost,
+                "Amount_Paid": amount_paid,
                 "Vehicle_No": vehicle_no,
                 "Trip_Days": trip_days,
                 "Route_Expenses": route_expenses,
@@ -151,9 +176,8 @@ def render() -> None:
                 "Driver_Salary": driver_salary,
                 "Vehicle_Charge": vehicle_charge,
                 "Freight": freight,
-                "Amount_Paid": amount_paid,
                 "Material_Rate": material_rate,
-                "Total_Cost": total_cost,
+                "Stock_In_Tons": stock_in_tons,
             }
             data = {key: data.get(key, "") for key in RAW_MATERIAL_COLUMNS}
             database.insert_row("Raw_Material_Log", data)
@@ -172,15 +196,16 @@ def render() -> None:
         "Qty",
         "Rate",
         "GST",
+        "Total_Cost",
+        "Amount_Paid",
         "Trip_Days",
         "Route_Expenses",
         "Diesel",
         "Driver_Salary",
         "Vehicle_Charge",
         "Freight",
-        "Amount_Paid",
         "Material_Rate",
-        "Total_Cost",
+        "Stock_In_Tons",
     ]
     entries = utils.coerce_numeric_columns(entries, numeric_columns)
 
@@ -213,14 +238,15 @@ def render() -> None:
         "Qty": {"numeric": True, "min": 0},
         "Rate": {"numeric": True, "min": 0},
         "GST": {"numeric": True, "min": 0},
+        "Total_Cost": {"numeric": True, "min": 0},
+        "Amount_Paid": {"numeric": True, "min": 0},
         "Route_Expenses": {"numeric": True, "min": 0},
         "Diesel": {"numeric": True, "min": 0},
         "Driver_Salary": {"numeric": True, "min": 0},
         "Vehicle_Charge": {"numeric": True, "min": 0},
         "Freight": {"numeric": True, "min": 0},
-        "Amount_Paid": {"numeric": True, "min": 0},
         "Material_Rate": {"numeric": True, "min": 0},
-        "Total_Cost": {"numeric": True, "min": 0},
+        "Stock_In_Tons": {"numeric": True, "min": 0},
     }
     mask, errors = utils.build_validation_mask(entries, rules)
     qty = pd.to_numeric(entries.get("Qty", pd.Series(dtype=float)), errors="coerce")
@@ -244,10 +270,21 @@ def render() -> None:
     calc_total_cost = (
         calc_material_rate + gst + route + diesel + driver + vehicle + freight_val
     )
+    material_series = entries.get("Material", pd.Series(dtype=str)).astype(str).str.strip()
+    calc_stock_in_tons = material_series.combine(
+        qty.fillna(0.0),
+        lambda material, qty_val: utils.material_qty_to_tons(material, utils.safe_float(qty_val)),
+    )
+    stock_in_tons = pd.to_numeric(
+        entries.get("Stock_In_Tons", pd.Series(dtype=float)),
+        errors="coerce",
+    )
     invalid_material_rate = (material_rate - calc_material_rate).abs() > 0.01
     invalid_total_cost = (total_cost - calc_total_cost).abs() > 0.01
+    invalid_stock_tons = (stock_in_tons - calc_stock_in_tons).abs() > 0.01
     mask = utils.apply_invalid_mask(mask, "Material_Rate", invalid_material_rate)
     mask = utils.apply_invalid_mask(mask, "Total_Cost", invalid_total_cost)
+    mask = utils.apply_invalid_mask(mask, "Stock_In_Tons", invalid_stock_tons)
 
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
@@ -265,6 +302,34 @@ def render() -> None:
                 row_id = str(row.get("RM_ID", "")).strip()
                 if not row_id:
                     continue
+                material = str(row.get("Material", "")).strip()
+                qty_val = utils.safe_float(row.get("Qty", 0))
+                rate_val = utils.safe_float(row.get("Rate", 0))
+                gst_val = utils.safe_float(row.get("GST", 0))
+                route_val = utils.safe_float(row.get("Route_Expenses", 0))
+                diesel_val = utils.safe_float(row.get("Diesel", 0))
+                driver_val = utils.safe_float(row.get("Driver_Salary", 0))
+                vehicle_val = utils.safe_float(row.get("Vehicle_Charge", 0))
+                freight_val = utils.safe_float(row.get("Freight", 0))
+                material_rate_val = qty_val * rate_val
+                total_cost_val = utils.calculate_total_cost(
+                    qty=qty_val,
+                    rate=rate_val,
+                    gst=gst_val,
+                    route_expenses=route_val,
+                    diesel=diesel_val,
+                    driver_salary=driver_val,
+                    vehicle_charge=vehicle_val,
+                    freight=freight_val,
+                )
+                stock_in_tons_val = utils.material_qty_to_tons(material, qty_val)
+                entry_date = _parse_date(row.get("Date", ""))
+                if entry_date:
+                    row["Year"] = entry_date.strftime("%Y")
+                    row["Month"] = utils.to_month_string(entry_date)
+                row["Material_Rate"] = material_rate_val
+                row["Total_Cost"] = total_cost_val
+                row["Stock_In_Tons"] = stock_in_tons_val
                 database.update_row(
                     "Raw_Material_Log",
                     row_id,
@@ -276,3 +341,58 @@ def render() -> None:
             st.rerun()
     else:
         st.success("No validation issues found.")
+
+    st.subheader("Reconciliation Snapshot")
+    stock_df = database.read_table("Stock_Log")
+    if stock_df.empty:
+        st.info("No system stock data available yet.")
+        return
+    stock_df = utils.ensure_columns(stock_df, ["Date", "Material", "Closing"])
+    stock_df["Date"] = pd.to_datetime(stock_df["Date"], errors="coerce", dayfirst=True).dt.date
+    stock_df["Closing"] = utils.to_numeric_series(
+        stock_df.get("Closing", pd.Series(dtype=float))
+    ).fillna(0.0)
+    latest_date = stock_df["Date"].dropna().max()
+    if latest_date is None:
+        st.info("No valid stock dates available.")
+        return
+
+    physical_df = database.read_table("Physical_Stock_Log")
+    physical_df = utils.ensure_columns(
+        physical_df,
+        ["Date", "Material", "Physical_Stock_Tons"],
+    )
+    physical_df["Date"] = pd.to_datetime(
+        physical_df.get("Date", pd.Series(dtype=str)),
+        errors="coerce",
+        dayfirst=True,
+    ).dt.date
+    physical_df["Physical_Stock_Tons"] = utils.to_numeric_series(
+        physical_df.get("Physical_Stock_Tons", pd.Series(dtype=float))
+    ).fillna(0.0)
+
+    rows = []
+    for material in ["Cement", "Fly Ash", "Stone Dust"]:
+        material_mask = stock_df["Material"].astype(str).str.strip().str.lower() == material.lower()
+        system_stock = stock_df[material_mask & (stock_df["Date"] <= latest_date)]
+        system_value = system_stock.sort_values("Date").iloc[-1]["Closing"] if not system_stock.empty else 0.0
+
+        physical_mask = physical_df["Material"].astype(str).str.strip().str.lower() == material.lower()
+        physical_stock = physical_df[physical_mask & (physical_df["Date"] <= latest_date)]
+        physical_value = (
+            physical_stock.sort_values("Date").iloc[-1]["Physical_Stock_Tons"]
+            if not physical_stock.empty
+            else None
+        )
+        variance = system_value - (physical_value if physical_value is not None else 0.0)
+        variance_pct = variance / physical_value if physical_value not in (None, 0) else None
+        rows.append(
+            {
+                "Material": material,
+                "System_Stock_Tons": round(system_value, 2),
+                "Physical_Stock_Tons": round(physical_value, 2) if physical_value is not None else "n/a",
+                "Variance_Tons": round(variance, 2),
+                "Variance_%": f"{variance_pct:.1%}" if variance_pct is not None else "n/a",
+            }
+        )
+    st.dataframe(pd.DataFrame(rows), width="stretch")

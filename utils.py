@@ -502,6 +502,30 @@ def generate_invoice_pdf(
     return buffer.read()
 
 
+def material_qty_to_tons(material: str, qty: float) -> float:
+    material_value = str(material or "").strip().lower()
+    if material_value == "cement":
+        return qty * 0.025
+    if material_value in {"fly ash", "stone dust"}:
+        return qty
+    return 0.0
+
+
+def _stock_in_tons(raw_df: pd.DataFrame) -> pd.Series:
+    if raw_df.empty:
+        return pd.Series(dtype=float)
+    material = raw_df.get("Material", pd.Series(dtype=str)).astype(str).str.strip().str.lower()
+    qty = pd.to_numeric(raw_df.get("Qty", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    stock = pd.Series(0.0, index=raw_df.index, dtype=float)
+    cement_mask = material == "cement"
+    flyash_mask = material == "fly ash"
+    stone_mask = material == "stone dust"
+    stock.loc[cement_mask] = qty.loc[cement_mask] * 0.025
+    stock.loc[flyash_mask] = qty.loc[flyash_mask]
+    stock.loc[stone_mask] = qty.loc[stone_mask]
+    return stock
+
+
 def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.DataFrame:
     columns = ["Date", "Month", "Material", "Opening", "Inward", "Consumed", "Closing"]
     if raw_df.empty and production_df.empty:
@@ -520,12 +544,13 @@ def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.D
 
     raw_df["Material"] = raw_df["Material"].astype(str).str.strip()
     raw_df["Qty"] = pd.to_numeric(raw_df["Qty"], errors="coerce").fillna(0.0)
+    raw_df["Stock_In_Tons"] = _stock_in_tons(raw_df)
 
     inbound = (
-        raw_df.groupby(["Date", "Material"], dropna=False)["Qty"]
+        raw_df.groupby(["Date", "Material"], dropna=False)["Stock_In_Tons"]
         .sum()
         .reset_index()
-        .rename(columns={"Qty": "Inward"})
+        .rename(columns={"Stock_In_Tons": "Inward"})
     )
 
     consumption_rows = []
