@@ -86,7 +86,6 @@ Add the following header row (row 1) for each tab:
 - Vehicle_Charge
 - Freight
 - Material_Rate
-- Stock_In_Tons
 
 **Production_Log**
 - Prod_ID
@@ -260,6 +259,9 @@ stock counts and reconciles expected vs actual consumption in **tons**:
 - System stock vs Physical_Stock_Log (variance and % variance).
 - Expected usage vs actual usage for cement, fly ash, and stone dust.
 - Material cost per brick and variance alerts (overconsumption, high variance).
+Note: Cement Qty is recorded in **bags** (1 bag = **0.05 tons**). Fly ash and
+stone dust Qty are recorded in **tons**. The app converts quantities to tons
+internally for stock calculations.
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.

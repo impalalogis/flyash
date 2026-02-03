@@ -505,7 +505,7 @@ def generate_invoice_pdf(
 def material_qty_to_tons(material: str, qty: float) -> float:
     material_value = str(material or "").strip().lower()
     if material_value == "cement":
-        return qty * 0.025
+        return qty * 0.05
     if material_value in {"fly ash", "stone dust"}:
         return qty
     return 0.0
