@@ -17,6 +17,7 @@ Create a Google Sheet and add the following tabs (case-sensitive):
 - `Production_Log`
 - `Sales_Log`
 - `Payments`
+- `Bank_Statement`
 - `Daily_Summary` (optional)
 
 ### 2) Add headers to each tab
@@ -134,6 +135,16 @@ Notes:
 - Mode
 - Payment_Status
 
+**Bank_Statement**
+- Txn_ID
+- Date
+- Narration
+- Debit
+- Credit
+- Balance
+- Reference
+- Counterparty
+
 **Daily_Summary (optional)**
 - Date
 - Total_Production
@@ -169,6 +180,37 @@ stone_dust_per_brick = 1.38
 contract_rate = 0.0
 payment_week_range_weeks = 1
 ```
+
+## Dashboard insights (business + technical)
+The Dashboard includes analytics that translate your logs into operational and financial guidance:
+
+**Business insights**
+- Production vs Sales comparisons (monthly/quarterly/yearly), gaps, and conversion ratios.
+- Best & worst months for production, sales, and conversion.
+- Raw material usage trends (cement, fly ash, stone dust) with procurement calendar hints.
+- Cost breakdown (labour, raw materials, freight/transport, maintenance) and cost per brick.
+- Actionable recommendations to improve profit, efficiency, and inventory balance.
+
+**Operational diagnostics**
+- Data anomaly detection: negative stock, sales > production, usage mismatches, sales spikes,
+  and cost spikes with likely causes + corrective actions.
+- Production vs sales days analysis with correlations and outlier months.
+- Profitability trends with profit margin and profit per brick.
+
+**KPI tools**
+- Diagnostic KPI report (like a medical test): current value, ideal range, status,
+  business meaning, and practical steps to improve.
+- KPI dictionary: definitions, why they matter, and target ranges.
+
+Tip: The quality of insights depends on accurate data entry for dates, quantities,
+and costs in the Google Sheets tabs.
+
+## Bank reconciliation
+The **Reconciliation** page matches bank credits/debits with sales invoices and
+supplier payments. To use it:
+- Maintain the `Bank_Statement` tab and keep narration/reference accurate.
+- Use invoice numbers in bank narration for faster matching.
+- Reconcile weekly to catch missing or duplicate entries early.
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.
