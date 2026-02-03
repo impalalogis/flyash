@@ -262,6 +262,10 @@ stock counts and reconciles expected vs actual consumption in **tons**:
 Note: Cement Qty is recorded in **bags** (1 bag = **0.05 tons**). Fly ash and
 stone dust Qty are recorded in **tons**. The app converts quantities to tons
 internally for stock calculations.
+Standard mix reference values (kg/brick) used in diagnostics:
+- Cement: 0.20
+- Fly Ash: 1.70
+- Stone Dust: 1.45
 
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.

@@ -103,7 +103,9 @@ def render() -> None:
     raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
     raw_df["Qty"] = utils.to_numeric_series(raw_df.get("Qty", pd.Series(dtype=float))).fillna(0.0)
     raw_df["Stock_In_Tons"] = raw_df.apply(
-        lambda row: utils.material_qty_to_tons(row.get("Material", ""), utils.safe_float(row.get("Qty", 0))),
+        lambda row: utils.material_qty_to_tons(
+            row.get("Material", ""), utils.safe_float(row.get("Qty", 0))
+        ),
         axis=1,
     )
 
@@ -156,90 +158,163 @@ def render() -> None:
     )
 
     materials = ["Cement", "Fly Ash", "Stone Dust"]
+    production_window = production_df[
+        (production_df["Date"] >= start_date) & (production_df["Date"] <= end_date)
+    ]
     bricks_produced = utils.to_numeric_series(
-        production_df.loc[
-            (production_df["Date"] >= start_date) & (production_df["Date"] <= end_date),
-            "No_of_Bricks",
-        ]
+        production_window.get("No_of_Bricks", pd.Series(dtype=float))
     ).fillna(0.0).sum()
 
-    system_rows = []
-    consumption_rows = []
-    cost_rows = []
+    cement_used_bags = utils.to_numeric_series(
+        production_window.get("Cement_Consumption", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    flyash_used_kg = utils.to_numeric_series(
+        production_window.get("FlyAsh_Consumption", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+    stonedust_used_kg = utils.to_numeric_series(
+        production_window.get("StoneDust_Consumption", pd.Series(dtype=float))
+    ).fillna(0.0).sum()
+
+    cement_used_kg = cement_used_bags * 50
+    cement_used_ton = cement_used_kg / 1000
+    flyash_used_ton = flyash_used_kg / 1000
+    stonedust_used_ton = stonedust_used_kg / 1000
+
+    cement_purchased_bags = raw_df.loc[
+        (raw_df["Date"] >= start_date)
+        & (raw_df["Date"] <= end_date)
+        & (raw_df["Material"].astype(str).str.strip().str.lower() == "cement"),
+        "Qty",
+    ].sum()
+    cement_purchased_kg = cement_purchased_bags * 50
+    cement_purchased_ton = cement_purchased_kg / 1000
+    flyash_purchased_ton = raw_df.loc[
+        (raw_df["Date"] >= start_date)
+        & (raw_df["Date"] <= end_date)
+        & (raw_df["Material"].astype(str).str.strip().str.lower() == "fly ash"),
+        "Qty",
+    ].sum()
+    stonedust_purchased_ton = raw_df.loc[
+        (raw_df["Date"] >= start_date)
+        & (raw_df["Date"] <= end_date)
+        & (raw_df["Material"].astype(str).str.strip().str.lower() == "stone dust"),
+        "Qty",
+    ].sum()
+
+    cement_stock_ton = cement_purchased_ton - cement_used_ton
+    flyash_stock_ton = flyash_purchased_ton - flyash_used_ton
+    stonedust_stock_ton = stonedust_purchased_ton - stonedust_used_ton
+
+    cement_per_brick = cement_used_kg / bricks_produced if bricks_produced else 0.0
+    flyash_per_brick = flyash_used_kg / bricks_produced if bricks_produced else 0.0
+    stonedust_per_brick = stonedust_used_kg / bricks_produced if bricks_produced else 0.0
+    total_material_per_brick = cement_per_brick + flyash_per_brick + stonedust_per_brick
+
+    cement_pct = cement_per_brick / total_material_per_brick if total_material_per_brick else 0.0
+    flyash_pct = flyash_per_brick / total_material_per_brick if total_material_per_brick else 0.0
+    stonedust_pct = stonedust_per_brick / total_material_per_brick if total_material_per_brick else 0.0
+
+    standard = {
+        "cement": 0.20,
+        "flyash": 1.70,
+        "stone_dust": 1.45,
+    }
+    cement_variance = cement_per_brick - standard["cement"]
+    flyash_variance = flyash_per_brick - standard["flyash"]
+    stonedust_variance = stonedust_per_brick - standard["stone_dust"]
+    cement_variance_pct = cement_variance / standard["cement"] if standard["cement"] else 0.0
+    flyash_variance_pct = flyash_variance / standard["flyash"] if standard["flyash"] else 0.0
+    stonedust_variance_pct = stonedust_variance / standard["stone_dust"] if standard["stone_dust"] else 0.0
+
     alerts = []
+    if cement_stock_ton < 0 or flyash_stock_ton < 0 or stonedust_stock_ton < 0:
+        alerts.append("NEGATIVE STOCK — opening stock missing")
+    if flyash_variance_pct > 0.10:
+        alerts.append("HIGH FLYASH USAGE")
+    if cement_variance_pct > 0.10:
+        alerts.append("HIGH CEMENT USAGE")
+    if stonedust_variance_pct > 0.10:
+        alerts.append("HIGH STONE DUST USAGE")
+
+    system_rows = [
+        {"Material": "Cement", "Purchased_Ton": round(cement_purchased_ton, 2), "Used_Ton": round(cement_used_ton, 2), "Stock_Ton": round(cement_stock_ton, 2)},
+        {"Material": "Fly Ash", "Purchased_Ton": round(flyash_purchased_ton, 2), "Used_Ton": round(flyash_used_ton, 2), "Stock_Ton": round(flyash_stock_ton, 2)},
+        {"Material": "Stone Dust", "Purchased_Ton": round(stonedust_purchased_ton, 2), "Used_Ton": round(stonedust_used_ton, 2), "Stock_Ton": round(stonedust_stock_ton, 2)},
+    ]
+
+    usage_rows = [
+        {"Material": "Cement", "Kg_per_Brick": round(cement_per_brick, 3), "Composition_%": f"{cement_pct:.1%}"},
+        {"Material": "Fly Ash", "Kg_per_Brick": round(flyash_per_brick, 3), "Composition_%": f"{flyash_pct:.1%}"},
+        {"Material": "Stone Dust", "Kg_per_Brick": round(stonedust_per_brick, 3), "Composition_%": f"{stonedust_pct:.1%}"},
+    ]
+
+    variance_rows = [
+        {"Material": "Cement", "Standard_kg": standard["cement"], "Actual_kg": round(cement_per_brick, 3), "Variance_kg": round(cement_variance, 3), "Variance_%": f"{cement_variance_pct:.1%}"},
+        {"Material": "Fly Ash", "Standard_kg": standard["flyash"], "Actual_kg": round(flyash_per_brick, 3), "Variance_kg": round(flyash_variance, 3), "Variance_%": f"{flyash_variance_pct:.1%}"},
+        {"Material": "Stone Dust", "Standard_kg": standard["stone_dust"], "Actual_kg": round(stonedust_per_brick, 3), "Variance_kg": round(stonedust_variance, 3), "Variance_%": f"{stonedust_variance_pct:.1%}"},
+    ]
+
+    physical_rows = []
     for material in materials:
-        inbound_tons = raw_df.loc[
-            (raw_df["Date"] >= start_date)
-            & (raw_df["Date"] <= end_date)
-            & (raw_df["Material"].astype(str).str.strip().str.lower() == material.lower()),
-            "Stock_In_Tons",
-        ].sum()
-        system_stock = _latest_by_material(stock_df, material, end_date)
         physical_stock = _latest_physical(physical_df, material, end_date)
+        system_stock = {
+            "cement": cement_stock_ton,
+            "fly ash": flyash_stock_ton,
+            "stone dust": stonedust_stock_ton,
+        }.get(material.lower(), 0.0)
         variance = system_stock - (physical_stock if physical_stock is not None else 0.0)
         variance_pct = variance / physical_stock if physical_stock not in (None, 0) else None
-
-        system_rows.append(
+        physical_rows.append(
             {
                 "Material": material,
-                "System_Stock_Tons": round(system_stock, 2),
-                "Physical_Stock_Tons": round(physical_stock, 2) if physical_stock is not None else "n/a",
-                "Variance_Tons": round(variance, 2),
+                "System_Stock_Ton": round(system_stock, 2),
+                "Physical_Stock_Ton": round(physical_stock, 2) if physical_stock is not None else "n/a",
+                "Variance_Ton": round(variance, 2),
                 "Variance_%": f"{variance_pct:.1%}" if variance_pct is not None else "n/a",
             }
         )
 
-        expected_per_brick = _material_per_brick(material, production_df, config, start_date, end_date)
-        expected_usage = bricks_produced * expected_per_brick
-        actual_usage = inbound_tons - system_stock
-        variance_use = actual_usage - expected_usage
-        variance_use_pct = variance_use / expected_usage if expected_usage else None
-
-        consumption_rows.append(
-            {
-                "Material": material,
-                "Expected_Usage_Tons": round(expected_usage, 2),
-                "Actual_Usage_Tons": round(actual_usage, 2),
-                "Variance_Tons": round(variance_use, 2),
-                "Variance_%": f"{variance_use_pct:.1%}" if variance_use_pct is not None else "n/a",
-            }
-        )
-
-        cost_window = raw_df.loc[
-            (raw_df["Date"] >= start_date)
-            & (raw_df["Date"] <= end_date)
-            & (raw_df["Material"].astype(str).str.strip().str.lower() == material.lower())
-        ]
-        total_cost = utils.to_numeric_series(cost_window.get("Total_Cost", pd.Series(dtype=float))).fillna(0.0).sum()
-        cost_per_ton = (total_cost / inbound_tons) if inbound_tons else 0.0
-        actual_cost = actual_usage * cost_per_ton
+    cost_rows = []
+    for material, used_ton in [
+        ("Cement", cement_used_ton),
+        ("Fly Ash", flyash_used_ton),
+        ("Stone Dust", stonedust_used_ton),
+    ]:
+        material_mask = raw_df["Material"].astype(str).str.strip().str.lower() == material.lower()
+        material_cost = utils.to_numeric_series(
+            raw_df.loc[material_mask, "Total_Cost"]
+        ).fillna(0.0).sum()
+        purchased_ton = raw_df.loc[material_mask, "Stock_In_Tons"].sum()
+        rate_per_ton = material_cost / purchased_ton if purchased_ton else 0.0
+        actual_cost = used_ton * rate_per_ton
         cost_per_brick = actual_cost / bricks_produced if bricks_produced else 0.0
-
         cost_rows.append(
             {
                 "Material": material,
-                "Rate_per_Ton": round(cost_per_ton, 2),
+                "Rate_per_Ton": round(rate_per_ton, 2),
                 "Actual_Cost": round(actual_cost, 2),
                 "Cost_per_Brick": round(cost_per_brick, 4),
             }
         )
 
-        if system_stock < 0:
-            alerts.append(f"{material}: negative system stock.")
-        if variance_use_pct is not None and abs(variance_use_pct) > 0.1:
-            alerts.append(f"{material}: high consumption variance ({variance_use_pct:.0%}).")
-        if variance_pct is not None and abs(variance_pct) > 0.1:
-            alerts.append(f"{material}: stock variance exceeds 10%.")
-
     total_cost_per_brick = (
         sum(row["Actual_Cost"] for row in cost_rows) / bricks_produced if bricks_produced else 0.0
     )
 
-    st.subheader("System Stock vs Physical Stock")
+    st.subheader("Stock Summary (tons)")
     st.dataframe(pd.DataFrame(system_rows), width="stretch")
 
-    st.subheader("Expected vs Actual Consumption")
-    st.dataframe(pd.DataFrame(consumption_rows), width="stretch")
+    st.subheader("System Stock vs Physical Stock")
+    st.dataframe(pd.DataFrame(physical_rows), width="stretch")
+
+    st.subheader("Material Usage per Brick (kg)")
+    st.dataframe(pd.DataFrame(usage_rows), width="stretch")
+
+    st.subheader("Composition Percentages per Brick")
+    st.dataframe(pd.DataFrame(usage_rows)[["Material", "Composition_%"]], width="stretch")
+
+    st.subheader("Standard vs Actual (kg/brick)")
+    st.dataframe(pd.DataFrame(variance_rows), width="stretch")
 
     st.subheader("Cost per Brick")
     cost_df = pd.DataFrame(cost_rows)
@@ -251,8 +326,51 @@ def render() -> None:
     }
     st.dataframe(cost_df, width="stretch")
 
-    st.subheader("Variance Analysis & Alerts")
+    st.subheader("Diagnostic KPI Report")
+    diagnostic_rows = [
+        {
+            "Material": "Cement",
+            "Purchased_Ton": round(cement_purchased_ton, 2),
+            "Used_Ton": round(cement_used_ton, 2),
+            "Stock_Ton": round(cement_stock_ton, 2),
+            "Kg_per_Brick": round(cement_per_brick, 3),
+            "Percentage": f"{cement_pct:.1%}",
+            "Standard_kg": standard["cement"],
+            "Variance_kg": round(cement_variance, 3),
+            "Variance_%": f"{cement_variance_pct:.1%}",
+        },
+        {
+            "Material": "Fly Ash",
+            "Purchased_Ton": round(flyash_purchased_ton, 2),
+            "Used_Ton": round(flyash_used_ton, 2),
+            "Stock_Ton": round(flyash_stock_ton, 2),
+            "Kg_per_Brick": round(flyash_per_brick, 3),
+            "Percentage": f"{flyash_pct:.1%}",
+            "Standard_kg": standard["flyash"],
+            "Variance_kg": round(flyash_variance, 3),
+            "Variance_%": f"{flyash_variance_pct:.1%}",
+        },
+        {
+            "Material": "Stone Dust",
+            "Purchased_Ton": round(stonedust_purchased_ton, 2),
+            "Used_Ton": round(stonedust_used_ton, 2),
+            "Stock_Ton": round(stonedust_stock_ton, 2),
+            "Kg_per_Brick": round(stonedust_per_brick, 3),
+            "Percentage": f"{stonedust_pct:.1%}",
+            "Standard_kg": standard["stone_dust"],
+            "Variance_kg": round(stonedust_variance, 3),
+            "Variance_%": f"{stonedust_variance_pct:.1%}",
+        },
+    ]
+    st.dataframe(pd.DataFrame(diagnostic_rows), width="stretch")
+
+    st.subheader("Alerts")
     if alerts:
-        st.markdown("\n".join([f"- {item}" for item in alerts]))
+        critical = [item for item in alerts if "NEGATIVE STOCK" in item]
+        warning = [item for item in alerts if "HIGH" in item]
+        if critical:
+            st.error("\n".join(critical))
+        if warning:
+            st.warning("\n".join(warning))
     else:
-        st.info("No high variance or negative stock alerts.")
+        st.success("No over-consumption or negative stock alerts.")

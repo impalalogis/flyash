@@ -555,15 +555,19 @@ def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.D
 
     consumption_rows = []
     consumption_map = {
-        "Cement": "Cement_Consumption",
-        "Fly Ash": "FlyAsh_Consumption",
-        "Stone Dust": "StoneDust_Consumption",
+        "Cement": ("Cement_Consumption", "bags"),
+        "Fly Ash": ("FlyAsh_Consumption", "kg"),
+        "Stone Dust": ("StoneDust_Consumption", "kg"),
     }
-    for material, column in consumption_map.items():
+    for material, (column, unit) in consumption_map.items():
         if column not in production_df.columns:
             continue
         temp = production_df[["Date", column]].copy()
         temp[column] = pd.to_numeric(temp[column], errors="coerce").fillna(0.0)
+        if unit == "bags":
+            temp[column] = temp[column] * 0.05
+        elif unit == "kg":
+            temp[column] = temp[column] / 1000
         temp = temp.rename(columns={column: "Consumed"})
         temp["Material"] = material
         consumption_rows.append(temp)
