@@ -388,6 +388,65 @@ def render() -> None:
     ]
     st.dataframe(pd.DataFrame(summary_rows), width="stretch")
 
+    st.subheader("Customer Outstanding and Stock")
+    col1, col2 = st.columns(2)
+    with col1:
+        if customers.empty:
+            st.info("No customer data available.")
+        else:
+            sales_outstanding = sales.copy()
+            sales_outstanding["Amount"] = utils.to_numeric_series(
+                sales_outstanding.get("Amount", pd.Series(dtype=float))
+            ).fillna(0.0)
+            sales_outstanding["Amount_Received"] = utils.to_numeric_series(
+                sales_outstanding.get("Amount_Received", pd.Series(dtype=float))
+            ).fillna(0.0)
+            sales_outstanding["Outstanding"] = (
+                sales_outstanding["Amount"] - sales_outstanding["Amount_Received"]
+            )
+            outstanding_by_customer = (
+                sales_outstanding.groupby("Customer_ID", dropna=False)["Outstanding"]
+                .sum()
+                .reset_index()
+            )
+            customer_view = customers[["Customer_ID", "Name"]].copy()
+            customer_view = customer_view.merge(
+                outstanding_by_customer,
+                on="Customer_ID",
+                how="left",
+            ).fillna(0.0)
+            customer_view = customer_view.rename(columns={"Outstanding": "Outstanding_Balance"})
+            st.dataframe(customer_view, width="stretch")
+
+    with col2:
+        if stock_log.empty:
+            st.info("No stock data available.")
+        else:
+            stock_filtered = _filter_by_date(stock_log, "Date", start_date, end_date)
+            stock_filtered["Closing"] = utils.to_numeric_series(
+                stock_filtered.get("Closing", pd.Series(dtype=float))
+            ).fillna(0.0)
+            latest_stock = (
+                stock_filtered.sort_values("Date")
+                .groupby("Material", as_index=False)
+                .tail(1)
+                .sort_values("Material")
+            )
+            st.dataframe(latest_stock, width="stretch")
+
+    if not stock_log.empty:
+        stock_chart = (
+            alt.Chart(stock_filtered)
+            .mark_line(point=True)
+            .encode(
+                x="Date:T",
+                y=alt.Y("Closing:Q", title="Closing Stock"),
+                color="Material",
+                tooltip=["Date", "Material", "Closing"],
+            )
+        )
+        st.altair_chart(stock_chart, width="stretch")
+
     # Supplementary metrics and capacity utilization removed per request
 
     st.subheader("Period Performance")
@@ -736,65 +795,6 @@ def render() -> None:
             .encode(x="Date:T", y="No_of_Bricks:Q", tooltip=["Date", "No_of_Bricks"])
         )
         st.altair_chart((line + bricks).resolve_scale(y="independent"), width="stretch")
-
-    st.subheader("Customer Outstanding and Stock")
-    col1, col2 = st.columns(2)
-    with col1:
-        if customers.empty:
-            st.info("No customer data available.")
-        else:
-            sales_outstanding = sales.copy()
-            sales_outstanding["Total_Amount"] = utils.to_numeric_series(
-                sales_outstanding.get("Total_Amount", pd.Series(dtype=float))
-            ).fillna(0.0)
-            sales_outstanding["Amount_Received"] = utils.to_numeric_series(
-                sales_outstanding.get("Amount_Received", pd.Series(dtype=float))
-            ).fillna(0.0)
-            sales_outstanding["Outstanding"] = (
-                sales_outstanding["Total_Amount"] - sales_outstanding["Amount_Received"]
-            )
-            outstanding_by_customer = (
-                sales_outstanding.groupby("Customer_ID", dropna=False)["Outstanding"]
-                .sum()
-                .reset_index()
-            )
-            customer_view = customers[["Customer_ID", "Name"]].copy()
-            customer_view = customer_view.merge(
-                outstanding_by_customer,
-                on="Customer_ID",
-                how="left",
-            ).fillna(0.0)
-            customer_view = customer_view.rename(columns={"Outstanding": "Outstanding_Balance"})
-            st.dataframe(customer_view, width="stretch")
-
-    with col2:
-        if stock_log.empty:
-            st.info("No stock data available.")
-        else:
-            stock_filtered = _filter_by_date(stock_log, "Date", start_date, end_date)
-            stock_filtered["Closing"] = utils.to_numeric_series(
-                stock_filtered.get("Closing", pd.Series(dtype=float))
-            ).fillna(0.0)
-            latest_stock = (
-                stock_filtered.sort_values("Date")
-                .groupby("Material", as_index=False)
-                .tail(1)
-                .sort_values("Material")
-            )
-            st.dataframe(latest_stock, width="stretch")
-
-    if not stock_log.empty:
-        stock_chart = (
-            alt.Chart(stock_filtered)
-            .mark_line(point=True)
-            .encode(
-                x="Date:T",
-                y=alt.Y("Closing:Q", title="Closing Stock"),
-                color="Material",
-                tooltip=["Date", "Material", "Closing"],
-            )
-        )
-        st.altair_chart(stock_chart, width="stretch")
 
     st.subheader("Insights & Recommendations")
     prod_month = _period_totals(production_filtered, "Date", "No_of_Bricks", "M", "Production")
