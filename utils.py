@@ -53,7 +53,7 @@ def payment_week_range(entry_date: date, weeks: int) -> tuple[date, date, str]:
 
 
 def to_month_string(value: date) -> str:
-    return value.strftime("%Y-%m")
+    return value.strftime("%B")
 
 
 def calculate_total_cost(

@@ -89,6 +89,7 @@ Add the following header row (row 1) for each tab:
 
 Notes:
 - Total_Cost = (Qty * Rate) + GST
+- Month is stored as full month name (e.g., "February"); Year is "YYYY".
 
 **Production_Log**
 - Prod_ID
