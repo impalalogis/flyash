@@ -87,6 +87,10 @@ Add the following header row (row 1) for each tab:
 - Freight
 - Material_Rate
 
+Notes:
+- Total_Cost = (Qty * Rate) + GST
+- Month is stored as full month name (e.g., "February"); Year is "YYYY".
+
 **Production_Log**
 - Prod_ID
 - Date
@@ -460,3 +464,50 @@ function pad3(value) {
   return String(value).padStart(3, "0");
 }
 ```
+
+## Daily backup (Apps Script)
+To automatically back up the sheet every day and purge backups older than 30 days,
+use this Apps Script:
+
+```javascript
+const BACKUP_PREFIX = "flyash-backup-";
+const BACKUP_DAYS_TO_KEEP = 30;
+// Optional: place backups in a specific folder
+const BACKUP_FOLDER_ID = "";
+
+function createDailyBackup() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "ddMMyy");
+  const backupName = `${BACKUP_PREFIX}${today}`;
+  const backup = ss.copy(backupName);
+
+  if (BACKUP_FOLDER_ID) {
+    const folder = DriveApp.getFolderById(BACKUP_FOLDER_ID);
+    const file = DriveApp.getFileById(backup.getId());
+    folder.addFile(file);
+    DriveApp.getRootFolder().removeFile(file);
+  }
+
+  purgeOldBackups();
+}
+
+function purgeOldBackups() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - BACKUP_DAYS_TO_KEEP);
+  const files = DriveApp.searchFiles(
+    `title contains '${BACKUP_PREFIX}' and mimeType = 'application/vnd.google-apps.spreadsheet'`
+  );
+  while (files.hasNext()) {
+    const file = files.next();
+    if (file.getDateCreated() < cutoff) {
+      file.setTrashed(true);
+    }
+  }
+}
+```
+
+**Schedule it daily:**
+1. Open **Extensions → Apps Script**.
+2. Paste the script and save.
+3. Click **Triggers** (clock icon) → **Add Trigger**.
+4. Choose `createDailyBackup` → **Time‑driven** → **Daily** → pick end‑of‑day time.

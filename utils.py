@@ -53,7 +53,7 @@ def payment_week_range(entry_date: date, weeks: int) -> tuple[date, date, str]:
 
 
 def to_month_string(value: date) -> str:
-    return value.strftime("%Y-%m")
+    return value.strftime("%B")
 
 
 def calculate_total_cost(
@@ -66,7 +66,7 @@ def calculate_total_cost(
     vehicle_charge: float,
     freight: float,
 ) -> float:
-    return (qty * rate) + gst + route_expenses + diesel + driver_salary + vehicle_charge + freight
+    return (qty * rate) + gst
 
 
 def calculate_labour_expense(

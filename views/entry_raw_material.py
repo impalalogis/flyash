@@ -259,9 +259,7 @@ def render() -> None:
     )
 
     calc_material_rate = qty * rate
-    calc_total_cost = (
-        calc_material_rate + gst + route + diesel + driver + vehicle + freight_val
-    )
+    calc_total_cost = calc_material_rate + gst
     invalid_material_rate = (material_rate - calc_material_rate).abs() > 0.01
     invalid_total_cost = (total_cost - calc_total_cost).abs() > 0.01
     mask = utils.apply_invalid_mask(mask, "Material_Rate", invalid_material_rate)
