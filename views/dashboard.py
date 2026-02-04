@@ -1400,7 +1400,13 @@ def render() -> None:
 
             st.markdown("**Profitability trends**")
             cost_month_summary = _period_cost_summary(raw_filtered, production_filtered, sales_filtered, "M")
-        sales_amount_month = _period_totals(sales_filtered, "Date", "Amount", "M", "Sales_Amount")
+            sales_amount_month = _period_totals(
+                sales_filtered,
+                "Date",
+                "Amount",
+                "M",
+                "Sales_Amount",
+            )
             profit_month = cost_month_summary.merge(
                 sales_amount_month[["Period", "Sales_Amount"]],
                 on="Period",
