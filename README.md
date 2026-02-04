@@ -269,6 +269,9 @@ Standard mix reference values (kg/brick) used in diagnostics:
 - Fly Ash: 1.70
 - Stone Dust: 1.45
 
+## Metrics reference
+See **METRICS.md** for a full list of dashboard KPIs, formulas, and source columns.
+
 ## Deploying on Streamlit Cloud
 1. Open your app settings in Streamlit Cloud.
 2. In "Secrets", paste the same content you would place in
