@@ -59,6 +59,14 @@ def main() -> None:
         page_icon="F",
         layout="wide",
     )
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebarNav"] { display: none; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("Fly-Ash Brick Manufacturing")
 
     connected = _init_connection()

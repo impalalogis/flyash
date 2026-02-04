@@ -1729,6 +1729,7 @@ def render() -> None:
     st.subheader("Dashboard Diagnostics")
     with st.expander("Data quality checks", expanded=False):
         max_rows = st.slider("Rows to preview", min_value=5, max_value=100, value=20, step=5)
+        invalid_records: list[dict[str, str]] = []
 
         def _preview(sample: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
             if sample.empty:
@@ -1739,6 +1740,28 @@ def render() -> None:
             cleaned.insert(0, "Row_No", cleaned.index.to_series().add(2).astype(int))
             cols = ["Row_No"] + [col for col in columns if col in cleaned.columns]
             return cleaned[cols]
+
+        def _record_issues(
+            sheet: str,
+            frame: pd.DataFrame,
+            mask: pd.Series,
+            column: str,
+            issue: str,
+        ) -> None:
+            if not mask.any():
+                return
+            rows = frame.loc[mask, [column]].copy()
+            rows.insert(0, "Row_No", rows.index.to_series().add(2).astype(int))
+            for _, row in rows.iterrows():
+                invalid_records.append(
+                    {
+                        "Sheet": sheet,
+                        "Issue": issue,
+                        "Column": column,
+                        "Row_No": str(row["Row_No"]),
+                        "Value": str(row[column]),
+                    }
+                )
 
         def _quality_block(label: str, frame: pd.DataFrame, date_col: str, numeric_cols: list[str]) -> None:
             st.markdown(f"**{label}**")
@@ -1759,6 +1782,7 @@ def render() -> None:
                     _preview(frame[invalid_date].head(max_rows), [date_col]),
                     width="stretch",
                 )
+                _record_issues(label, frame, invalid_date, date_col, "Invalid Date")
             for column in numeric_cols:
                 numeric = utils.to_numeric_series(frame.get(column, pd.Series(dtype=str)))
                 raw_values = frame.get(column, pd.Series(dtype=str)).astype(str).str.strip()
@@ -1774,6 +1798,7 @@ def render() -> None:
                         _preview(frame[invalid_num].head(max_rows), [column]),
                         width="stretch",
                     )
+                    _record_issues(label, frame, invalid_num, column, "Invalid Number")
 
         st.markdown("**Fix checklist**")
         st.markdown(
@@ -1804,3 +1829,11 @@ def render() -> None:
             "Date",
             ["Total_Cost", "Qty", "Rate"],
         )
+
+        if invalid_records:
+            st.download_button(
+                "Download invalid rows (CSV)",
+                data=pd.DataFrame(invalid_records).to_csv(index=False),
+                file_name="dashboard_invalid_rows.csv",
+                mime="text/csv",
+            )
