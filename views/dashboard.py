@@ -1728,17 +1728,26 @@ def render() -> None:
 
     st.subheader("Dashboard Diagnostics")
     with st.expander("Data quality checks", expanded=False):
+        max_rows = st.slider("Rows to preview", min_value=5, max_value=100, value=20, step=5)
+
+        def _preview(sample: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+            if sample.empty:
+                return sample
+            cleaned = sample.copy()
+            cleaned = cleaned.where(pd.notnull(cleaned), "")
+            cleaned = cleaned.astype(str)
+            cleaned.insert(0, "Row_No", cleaned.index.to_series().add(2).astype(int))
+            cols = ["Row_No"] + [col for col in columns if col in cleaned.columns]
+            return cleaned[cols]
+
         def _quality_block(label: str, frame: pd.DataFrame, date_col: str, numeric_cols: list[str]) -> None:
             st.markdown(f"**{label}**")
             if frame.empty:
                 st.write("No rows.")
                 return
-            def _preview(sample: pd.DataFrame) -> pd.DataFrame:
-                cleaned = sample.copy()
-                cleaned = cleaned.where(pd.notnull(cleaned), "")
-                return cleaned.astype(str)
             date_series = pd.to_datetime(frame.get(date_col, pd.Series(dtype=str)), errors="coerce", dayfirst=True)
-            invalid_date = date_series.isna()
+            raw_dates = frame.get(date_col, pd.Series(dtype=str)).astype(str).str.strip()
+            invalid_date = date_series.isna() & (raw_dates != "")
             st.write(
                 {
                     "rows": len(frame),
@@ -1746,10 +1755,14 @@ def render() -> None:
                 }
             )
             if invalid_date.any():
-                st.dataframe(_preview(frame[invalid_date].head(5)), width="stretch")
+                st.dataframe(
+                    _preview(frame[invalid_date].head(max_rows), [date_col]),
+                    width="stretch",
+                )
             for column in numeric_cols:
                 numeric = utils.to_numeric_series(frame.get(column, pd.Series(dtype=str)))
-                invalid_num = numeric.isna()
+                raw_values = frame.get(column, pd.Series(dtype=str)).astype(str).str.strip()
+                invalid_num = numeric.isna() & (raw_values != "")
                 st.write(
                     {
                         "column": column,
@@ -1757,7 +1770,21 @@ def render() -> None:
                     }
                 )
                 if invalid_num.any():
-                    st.dataframe(_preview(frame[invalid_num].head(5)), width="stretch")
+                    st.dataframe(
+                        _preview(frame[invalid_num].head(max_rows), [column]),
+                        width="stretch",
+                    )
+
+        st.markdown("**Fix checklist**")
+        st.markdown(
+            "\n".join(
+                [
+                    "- Ensure Date columns are valid (YYYY-MM-DD recommended).",
+                    "- Remove extra spaces or text in numeric fields.",
+                    "- Re-check rows listed above and update in Google Sheets.",
+                ]
+            )
+        )
 
         _quality_block(
             "Production Log",
