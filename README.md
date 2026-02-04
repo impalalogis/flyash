@@ -87,6 +87,9 @@ Add the following header row (row 1) for each tab:
 - Freight
 - Material_Rate
 
+Notes:
+- Total_Cost = (Qty * Rate) + GST
+
 **Production_Log**
 - Prod_ID
 - Date

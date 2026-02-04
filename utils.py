@@ -66,7 +66,7 @@ def calculate_total_cost(
     vehicle_charge: float,
     freight: float,
 ) -> float:
-    return (qty * rate) + gst + route_expenses + diesel + driver_salary + vehicle_charge + freight
+    return (qty * rate) + gst
 
 
 def calculate_labour_expense(
