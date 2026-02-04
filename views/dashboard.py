@@ -246,9 +246,14 @@ def render() -> None:
 
     period = st.selectbox("Period", ["Monthly", "Quarterly", "Yearly"], index=0)
 
-    raw_filtered = _filter_by_date(raw_materials, "Date", start_date, end_date)
-    production_filtered = _filter_by_date(production, "Date", start_date, end_date)
-    sales_filtered = _filter_by_date(sales, "Date", start_date, end_date)
+    if scope == "Full data":
+        raw_filtered = raw_materials.copy()
+        production_filtered = production.copy()
+        sales_filtered = sales.copy()
+    else:
+        raw_filtered = _filter_by_date(raw_materials, "Date", start_date, end_date)
+        production_filtered = _filter_by_date(production, "Date", start_date, end_date)
+        sales_filtered = _filter_by_date(sales, "Date", start_date, end_date)
 
     total_sales = utils.to_numeric_series(
         sales_filtered.get("Amount", pd.Series(dtype=float))
@@ -273,6 +278,23 @@ def render() -> None:
     labour_per_1000 = (total_labour / total_production * 1000) if total_production else 0.0
     material_per_1000 = (total_raw_cost / total_production * 1000) if total_production else 0.0
     collection_ratio = (total_received / total_sales) if total_sales else 0.0
+
+    if scope == "Full data":
+        invalid_sales_dates = pd.to_datetime(
+            sales.get("Date", pd.Series(dtype=str)),
+            errors="coerce",
+            dayfirst=True,
+        ).isna()
+        invalid_prod_dates = pd.to_datetime(
+            production.get("Date", pd.Series(dtype=str)),
+            errors="coerce",
+            dayfirst=True,
+        ).isna()
+        if invalid_sales_dates.any() or invalid_prod_dates.any():
+            st.caption(
+                "Full data includes rows with invalid dates. "
+                "Time-based charts exclude those rows."
+            )
 
     current_inventory = (
         utils.to_numeric_series(
