@@ -218,28 +218,40 @@ def render() -> None:
     min_date = min(all_dates) if all_dates else date.today()
     max_date = max(all_dates) if all_dates else date.today()
 
-    date_range = st.date_input("Date Range", value=(min_date, max_date))
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
+    scope_options = [
+        "Full data",
+        "FY 2023-24",
+        "FY 2024-25",
+        "FY 2025-26",
+        "Last 6 months",
+        "Last 3 months",
+        "Current month",
+    ]
+    scope = st.selectbox("Data scope", scope_options, index=0)
+    if scope == "Full data":
+        start_date, end_date = min_date, max_date
+    elif scope.startswith("FY"):
+        year_part = int(scope.split()[1].split("-")[0])
+        start_date = date(year_part, 4, 1)
+        end_date = date(year_part + 1, 3, 31)
+    elif scope == "Last 6 months":
+        start_date = (pd.Timestamp(max_date) - pd.DateOffset(months=6)).date()
+        end_date = max_date
+    elif scope == "Last 3 months":
+        start_date = (pd.Timestamp(max_date) - pd.DateOffset(months=3)).date()
+        end_date = max_date
     else:
-        start_date = min_date
+        start_date = date(max_date.year, max_date.month, 1)
         end_date = max_date
 
     period = st.selectbox("Period", ["Monthly", "Quarterly", "Yearly"], index=0)
-    with st.expander("Benchmarks", expanded=False):
-        daily_capacity = st.number_input(
-            "Daily Capacity (bricks)",
-            min_value=0,
-            step=1000,
-            value=0,
-        )
 
     raw_filtered = _filter_by_date(raw_materials, "Date", start_date, end_date)
     production_filtered = _filter_by_date(production, "Date", start_date, end_date)
     sales_filtered = _filter_by_date(sales, "Date", start_date, end_date)
 
     total_sales = utils.to_numeric_series(
-        sales_filtered.get("Total_Amount", pd.Series(dtype=float))
+        sales_filtered.get("Amount", pd.Series(dtype=float))
     ).fillna(0.0).sum()
     total_raw_cost = utils.to_numeric_series(
         raw_filtered.get("Total_Cost", pd.Series(dtype=float))
@@ -260,7 +272,7 @@ def render() -> None:
     avg_price = (total_sales / total_sold_bricks) if total_sold_bricks else 0.0
     labour_per_1000 = (total_labour / total_production * 1000) if total_production else 0.0
     material_per_1000 = (total_raw_cost / total_production * 1000) if total_production else 0.0
-    collection_ratio = (total_received / total_sales * 100) if total_sales else 0.0
+    collection_ratio = (total_received / total_sales) if total_sales else 0.0
 
     current_inventory = (
         utils.to_numeric_series(
@@ -287,7 +299,7 @@ def render() -> None:
     row2 = st.columns(5)
     row2[0].metric("Available Brick Stock", f"{current_inventory:,.0f}")
     row2[1].metric("Avg Selling Price", f"{avg_price:,.2f}")
-    row2[2].metric("Collection Ratio", f"{collection_ratio:,.1f}%")
+    row2[2].metric("Collection Ratio", f"{collection_ratio:,.2f}")
     row2[3].metric("Production Entries", f"{production_entries}")
     row2[4].metric("Production Days", f"{production_days}")
 
@@ -376,30 +388,15 @@ def render() -> None:
     ]
     st.dataframe(pd.DataFrame(summary_rows), width="stretch")
 
-    with st.expander("Supplementary Metrics", expanded=False):
-        metric7, metric8 = st.columns(2)
-        metric7.metric("Labour/1000 Bricks", f"{labour_per_1000:,.2f}")
-        metric8.metric("Material/1000 Bricks", f"{material_per_1000:,.2f}")
-
-    total_capacity = production_days * daily_capacity if daily_capacity else 0
-    capacity_utilization = (
-        (total_production / total_capacity * 100) if total_capacity else 0.0
-    )
-    metric10, metric11, metric12 = st.columns(3)
-    metric10.metric("Production Entries", f"{production_entries}")
-    metric11.metric("Production Days", f"{production_days}")
-    if daily_capacity:
-        metric12.metric("Capacity Utilization", f"{capacity_utilization:,.1f}%")
-    else:
-        metric12.metric("Capacity Utilization", "Set capacity")
+    # Supplementary metrics and capacity utilization removed per request
 
     st.subheader("Period Performance")
     if sales_filtered.empty and raw_filtered.empty and production_filtered.empty:
         st.info("No data available for the selected range.")
     else:
         sales_period = _add_period_column(sales_filtered, "Date", period)
-        sales_period["Total_Amount"] = utils.to_numeric_series(
-            sales_period.get("Total_Amount", pd.Series(dtype=float))
+        sales_period["Amount"] = utils.to_numeric_series(
+            sales_period.get("Amount", pd.Series(dtype=float))
         ).fillna(0.0)
         sales_period["No_of_Bricks"] = utils.to_numeric_series(
             sales_period.get("No_of_Bricks", pd.Series(dtype=float))
@@ -430,10 +427,10 @@ def render() -> None:
         ).dt.date
 
         sales_summary = (
-            sales_period.groupby("Period", dropna=False)["Total_Amount"]
+            sales_period.groupby("Period", dropna=False)["Amount"]
             .sum()
             .reset_index()
-            .rename(columns={"Total_Amount": "Sales"})
+            .rename(columns={"Amount": "Sales"})
         )
         prod_summary = (
             labour_period.groupby("Period", dropna=False)["No_of_Bricks"]
@@ -513,10 +510,10 @@ def render() -> None:
 
         st.subheader("Collection Performance")
         collection_summary = (
-            sales_period.groupby("Period", dropna=False)[["Total_Amount", "Amount_Received"]]
+            sales_period.groupby("Period", dropna=False)[["Amount", "Amount_Received"]]
             .sum()
             .reset_index()
-            .rename(columns={"Total_Amount": "Sales", "Amount_Received": "Collected"})
+            .rename(columns={"Amount": "Sales", "Amount_Received": "Collected"})
         )
         collection_melt = collection_summary.melt(
             id_vars=["Period"],
@@ -661,42 +658,7 @@ def render() -> None:
         )
         st.altair_chart(freight_chart, width="stretch")
 
-        if daily_capacity and not labour_period.empty:
-            st.subheader("Capacity Utilization Trend")
-            capacity_days = (
-                labour_period.groupby("Period", dropna=False)["Date"]
-                .nunique()
-                .reset_index()
-                .rename(columns={"Date": "Production_Days"})
-            )
-            capacity_summary = prod_summary.merge(capacity_days, on="Period", how="left").fillna(0)
-            capacity_summary["Capacity"] = capacity_summary["Production_Days"] * daily_capacity
-            capacity_summary["Utilization"] = capacity_summary.apply(
-                lambda row: (row["Production"] / row["Capacity"] * 100) if row["Capacity"] else 0.0,
-                axis=1,
-            )
-            cap_base = alt.Chart(capacity_summary).encode(x="Period:O")
-            cap_chart = alt.layer(
-                cap_base.mark_bar(opacity=0.3).encode(
-                    y=alt.Y("Production:Q", title="Bricks"),
-                    tooltip=["Period", "Production", "Capacity"],
-                ),
-                cap_base.mark_line(point=True, color="orange").encode(
-                    y=alt.Y("Capacity:Q", title="Capacity"),
-                ),
-            ).resolve_scale(y="independent")
-            st.altair_chart(cap_chart, width="stretch")
-
-            util_chart = (
-                alt.Chart(capacity_summary)
-                .mark_line(point=True)
-                .encode(
-                    x="Period:O",
-                    y=alt.Y("Utilization:Q", title="Utilization %"),
-                    tooltip=["Period", "Utilization"],
-                )
-            )
-            st.altair_chart(util_chart, width="stretch")
+        # Capacity utilization trend removed per request.
 
     st.subheader("Production Efficiency")
     if production_filtered.empty:
@@ -778,11 +740,32 @@ def render() -> None:
     st.subheader("Customer Outstanding and Stock")
     col1, col2 = st.columns(2)
     with col1:
-        if not customers.empty:
-            customer_view = customers[["Customer_ID", "Name", "Outstanding_Balance"]].copy()
-            st.dataframe(customer_view, width="stretch")
-        else:
+        if customers.empty:
             st.info("No customer data available.")
+        else:
+            sales_outstanding = sales.copy()
+            sales_outstanding["Total_Amount"] = utils.to_numeric_series(
+                sales_outstanding.get("Total_Amount", pd.Series(dtype=float))
+            ).fillna(0.0)
+            sales_outstanding["Amount_Received"] = utils.to_numeric_series(
+                sales_outstanding.get("Amount_Received", pd.Series(dtype=float))
+            ).fillna(0.0)
+            sales_outstanding["Outstanding"] = (
+                sales_outstanding["Total_Amount"] - sales_outstanding["Amount_Received"]
+            )
+            outstanding_by_customer = (
+                sales_outstanding.groupby("Customer_ID", dropna=False)["Outstanding"]
+                .sum()
+                .reset_index()
+            )
+            customer_view = customers[["Customer_ID", "Name"]].copy()
+            customer_view = customer_view.merge(
+                outstanding_by_customer,
+                on="Customer_ID",
+                how="left",
+            ).fillna(0.0)
+            customer_view = customer_view.rename(columns={"Outstanding": "Outstanding_Balance"})
+            st.dataframe(customer_view, width="stretch")
 
     with col2:
         if stock_log.empty:
@@ -1417,7 +1400,7 @@ def render() -> None:
 
             st.markdown("**Profitability trends**")
             cost_month_summary = _period_cost_summary(raw_filtered, production_filtered, sales_filtered, "M")
-            sales_amount_month = _period_totals(sales_filtered, "Date", "Total_Amount", "M", "Sales_Amount")
+        sales_amount_month = _period_totals(sales_filtered, "Date", "Amount", "M", "Sales_Amount")
             profit_month = cost_month_summary.merge(
                 sales_amount_month[["Period", "Sales_Amount"]],
                 on="Period",
@@ -1495,7 +1478,7 @@ def render() -> None:
                     {"KPI": "Cost per brick", "Value": f"{cost_per_brick:,.2f}"},
                     {"KPI": "Avg selling price per brick", "Value": f"{avg_price_per_brick:,.2f}"},
                     {"KPI": "Margin per brick", "Value": f"{margin_per_brick:,.2f}"},
-                    {"KPI": "Collection ratio", "Value": f"{collection_ratio:,.1f}%"},
+                    {"KPI": "Collection ratio", "Value": f"{collection_ratio:,.2f}"},
                 ]
             )
             st.dataframe(pd.DataFrame(kpi_rows), width="stretch")
@@ -1545,12 +1528,12 @@ def render() -> None:
                 },
                 {
                     "name": "Collection ratio",
-                    "value": collection_ratio / 100,
+                    "value": collection_ratio,
                     "low": 0.95,
                     "high": 1.0,
-                    "format": "{:.1%}",
+                    "format": "{:.2f}",
                     "definition": "Amount received divided by total sales.",
-                    "range": "95% - 100%",
+                    "range": "0.95 - 1.00",
                     "why": "Tracks cash recovery and receivables health.",
                     "meaning": {
                         "Low": "Receivables are high; cash flow risk.",
@@ -1641,26 +1624,6 @@ def render() -> None:
                         "Low": "Align staffing to demand and improve workflow.",
                         "High": "Sustain output while monitoring quality.",
                         "Normal": "Maintain training and batching discipline.",
-                    },
-                },
-                {
-                    "name": "Capacity utilization",
-                    "value": capacity_utilization / 100 if daily_capacity else None,
-                    "low": 0.7,
-                    "high": 0.9,
-                    "format": "{:.1%}",
-                    "definition": "Actual output divided by planned capacity.",
-                    "range": "70% - 90%",
-                    "why": "Shows if capacity is well used.",
-                    "meaning": {
-                        "Low": "Capacity under-utilized; demand or downtime issue.",
-                        "Normal": "Capacity is used efficiently.",
-                        "High": "Running near full capacity; risk of burnout.",
-                    },
-                    "improve": {
-                        "Low": "Improve demand planning or reduce downtime.",
-                        "High": "Plan maintenance and secure raw materials.",
-                        "Normal": "Maintain balanced production planning.",
                     },
                 },
             ]
@@ -1778,7 +1741,7 @@ def render() -> None:
             "Sales Log",
             sales,
             "Date",
-            ["Total_Amount", "Amount_Received", "No_of_Bricks"],
+            ["Amount", "Amount_Received", "No_of_Bricks"],
         )
         _quality_block(
             "Raw Material Log",
