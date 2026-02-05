@@ -126,6 +126,105 @@ def _reconciliation_monthly_table(
     return pd.DataFrame(rows, columns=columns)
 
 
+def _reconciliation_raw_material_table(
+    raw_frame: pd.DataFrame,
+    month_windows: list[dict[str, date]],
+    *,
+    total_label: str = "FY Total",
+) -> pd.DataFrame:
+    columns = [
+        "Date",
+        "Qty_Cement (count)",
+        "Qty_Cement (sum)",
+        "Qty_FlyAsh (count)",
+        "Qty_FlyAsh (sum)",
+        "Qty_Stone_Dust (count)",
+        "Qty_Stone_Dust (sum)",
+        "Total_Cost (sum)",
+    ]
+    if raw_frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    frame = raw_frame.copy()
+    frame["Material"] = frame.get("Material", pd.Series(dtype=str)).astype(str).str.strip().apply(
+        utils.canonical_material_label
+    )
+    dt = pd.to_datetime(
+        frame.get("Date", pd.Series(dtype=str)),
+        errors="coerce",
+        dayfirst=True,
+    )
+
+    def _material_row(subset: pd.DataFrame, material: str) -> tuple[int, float]:
+        material_mask = (
+            subset.get("Material", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            == material.lower()
+        )
+        material_subset = subset.loc[material_mask]
+        qty_series = utils.to_numeric_series(
+            material_subset.get("Qty", pd.Series(dtype=float))
+        )
+        count = int(qty_series.notna().sum())
+        total = float(qty_series.fillna(0.0).sum())
+        return count, total
+
+    rows: list[dict[str, float | int | str]] = []
+    for window in month_windows:
+        mask = (dt >= pd.Timestamp(window["start"])) & (dt <= pd.Timestamp(window["end"]))
+        subset = frame.loc[mask]
+        cement_count, cement_sum = _material_row(subset, "Cement")
+        flyash_count, flyash_sum = _material_row(subset, "Fly Ash")
+        stone_count, stone_sum = _material_row(subset, "Stone Dust")
+        cost_sum = float(
+            utils.to_numeric_series(subset.get("Total_Cost", pd.Series(dtype=float)))
+            .fillna(0.0)
+            .sum()
+        )
+        rows.append(
+            {
+                "Date": window["label"],
+                "Qty_Cement (count)": cement_count,
+                "Qty_Cement (sum)": cement_sum,
+                "Qty_FlyAsh (count)": flyash_count,
+                "Qty_FlyAsh (sum)": flyash_sum,
+                "Qty_Stone_Dust (count)": stone_count,
+                "Qty_Stone_Dust (sum)": stone_sum,
+                "Total_Cost (sum)": cost_sum,
+            }
+        )
+
+    if month_windows:
+        fy_start = month_windows[0]["start"]
+        fy_end = month_windows[-1]["end"]
+        mask = (dt >= pd.Timestamp(fy_start)) & (dt <= pd.Timestamp(fy_end))
+        subset = frame.loc[mask]
+        cement_count, cement_sum = _material_row(subset, "Cement")
+        flyash_count, flyash_sum = _material_row(subset, "Fly Ash")
+        stone_count, stone_sum = _material_row(subset, "Stone Dust")
+        cost_sum = float(
+            utils.to_numeric_series(subset.get("Total_Cost", pd.Series(dtype=float)))
+            .fillna(0.0)
+            .sum()
+        )
+        rows.append(
+            {
+                "Date": total_label,
+                "Qty_Cement (count)": cement_count,
+                "Qty_Cement (sum)": cement_sum,
+                "Qty_FlyAsh (count)": flyash_count,
+                "Qty_FlyAsh (sum)": flyash_sum,
+                "Qty_Stone_Dust (count)": stone_count,
+                "Qty_Stone_Dust (sum)": stone_sum,
+                "Total_Cost (sum)": cost_sum,
+            }
+        )
+
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _period_totals(
     data_frame: pd.DataFrame,
     date_col: str,
@@ -461,12 +560,7 @@ def render() -> None:
     st.dataframe(production_recon, width="stretch")
 
     st.markdown("**Raw Material Log**")
-    raw_recon = _reconciliation_monthly_table(
-        raw_materials,
-        "Date",
-        [("Qty", "Qty"), ("Total_Cost", "Total_Cost")],
-        month_windows,
-    )
+    raw_recon = _reconciliation_raw_material_table(raw_materials, month_windows)
     st.dataframe(raw_recon, width="stretch")
 
     st.subheader("Cost & Profit Summary")
