@@ -173,6 +173,16 @@ def _period_day_counts(
     return grouped
 
 
+def _fill_numeric_columns(data_frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    data_frame = data_frame.copy()
+    for column in columns:
+        if column in data_frame.columns:
+            data_frame[column] = utils.to_numeric_series(
+                data_frame.get(column, pd.Series(dtype=float))
+            ).fillna(0.0)
+    return data_frame
+
+
 def _period_cost_summary(
     raw_frame: pd.DataFrame,
     labour_frame: pd.DataFrame,
@@ -190,7 +200,8 @@ def _period_cost_summary(
         freight_cost[["Period", "Freight_Cost"]],
         on="Period",
         how="left",
-    ).fillna(0.0)
+    )
+    summary = _fill_numeric_columns(summary, ["Raw_Cost", "Labour_Cost", "Freight_Cost"])
     summary["Total_Cost"] = (
         summary["Raw_Cost"] + summary["Labour_Cost"] + summary["Freight_Cost"]
     )
@@ -577,7 +588,7 @@ def render() -> None:
         if stock_log.empty:
             st.info("No stock data available.")
         else:
-            stock_filtered = _filter_by_date(stock_log, "Date", start_date, end_date)
+            stock_filtered = _filter_by_date(stock_log, "Date", start_date, end_date).copy()
             stock_filtered["Closing"] = utils.to_numeric_series(
                 stock_filtered.get("Closing", pd.Series(dtype=float))
             ).fillna(0.0)
@@ -1458,7 +1469,11 @@ def render() -> None:
                 sales_days_m[["Period", "Sales_Days"]],
                 on="Period",
                 how="outer",
-            ).fillna(0.0)
+            )
+            days_month = _fill_numeric_columns(days_month, ["Production_Days", "Sales_Days"])
+            days_month["Period_Label"] = days_month["Period"].apply(
+                lambda value: _period_label(value, "M")
+            )
             days_month["Days_Ratio"] = days_month["Production_Days"].div(
                 days_month["Sales_Days"].replace(0, pd.NA)
             )
@@ -1472,7 +1487,11 @@ def render() -> None:
                 sales_days_q[["Period", "Sales_Days"]],
                 on="Period",
                 how="outer",
-            ).fillna(0.0)
+            )
+            days_quarter = _fill_numeric_columns(days_quarter, ["Production_Days", "Sales_Days"])
+            days_quarter["Period_Label"] = days_quarter["Period"].apply(
+                lambda value: _period_label(value, "Q")
+            )
             days_quarter["Days_Ratio"] = days_quarter["Production_Days"].div(
                 days_quarter["Sales_Days"].replace(0, pd.NA)
             )
@@ -1486,7 +1505,11 @@ def render() -> None:
                 sales_days_y[["Period", "Sales_Days"]],
                 on="Period",
                 how="outer",
-            ).fillna(0.0)
+            )
+            days_year = _fill_numeric_columns(days_year, ["Production_Days", "Sales_Days"])
+            days_year["Period_Label"] = days_year["Period"].apply(
+                lambda value: _period_label(value, "Y")
+            )
             days_year["Days_Ratio"] = days_year["Production_Days"].div(
                 days_year["Sales_Days"].replace(0, pd.NA)
             )
@@ -1499,7 +1522,8 @@ def render() -> None:
                 monthly_summary[["Period", "Production", "Sales"]],
                 on="Period",
                 how="left",
-            ).fillna(0.0)
+            )
+            days_month = _fill_numeric_columns(days_month, ["Production", "Sales"])
             prod_output_corr = _safe_corr(
                 days_month["Production_Days"],
                 days_month["Production"],
