@@ -52,6 +52,80 @@ def _period_label(value: pd.Period, freq: str) -> str:
     return str(value.year)
 
 
+FY_START_MONTH = 4
+
+
+def _fy_start_year(value: date) -> int:
+    return value.year if value.month >= FY_START_MONTH else value.year - 1
+
+
+def _fy_label(start_year: int) -> str:
+    return f"FY {start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _fy_month_windows(start_year: int) -> list[dict[str, date]]:
+    windows = []
+    for offset in range(12):
+        month = ((FY_START_MONTH + offset - 1) % 12) + 1
+        year = start_year if month >= FY_START_MONTH else start_year + 1
+        start = date(year, month, 1)
+        end = (pd.Timestamp(start) + pd.offsets.MonthEnd(1)).date()
+        label = pd.Timestamp(start).strftime("%b")
+        windows.append({"label": label, "start": start, "end": end})
+    return windows
+
+
+def _fy_years_from_dates(dates: list[date]) -> list[int]:
+    if not dates:
+        today = date.today()
+        return [_fy_start_year(today)]
+    start_year = _fy_start_year(min(dates))
+    end_year = _fy_start_year(max(dates))
+    return list(range(start_year, end_year + 1))
+
+
+def _reconciliation_monthly_table(
+    data_frame: pd.DataFrame,
+    date_col: str,
+    metrics: list[tuple[str, str]],
+    month_windows: list[dict[str, date]],
+    *,
+    total_label: str = "FY Total",
+) -> pd.DataFrame:
+    dt = pd.to_datetime(
+        data_frame.get(date_col, pd.Series(dtype=str)),
+        errors="coerce",
+        dayfirst=True,
+    )
+    rows: list[dict[str, float | int | str]] = []
+    for window in month_windows:
+        mask = (dt >= pd.Timestamp(window["start"])) & (dt <= pd.Timestamp(window["end"]))
+        subset = data_frame.loc[mask]
+        row: dict[str, float | int | str] = {"Date": window["label"]}
+        for column, label in metrics:
+            series = utils.to_numeric_series(subset.get(column, pd.Series(dtype=float)))
+            row[f"{label} (count)"] = int(series.notna().sum())
+            row[f"{label} (sum)"] = float(series.fillna(0.0).sum())
+        rows.append(row)
+
+    if month_windows:
+        fy_start = month_windows[0]["start"]
+        fy_end = month_windows[-1]["end"]
+        mask = (dt >= pd.Timestamp(fy_start)) & (dt <= pd.Timestamp(fy_end))
+        subset = data_frame.loc[mask]
+        total_row: dict[str, float | int | str] = {"Date": total_label}
+        for column, label in metrics:
+            series = utils.to_numeric_series(subset.get(column, pd.Series(dtype=float)))
+            total_row[f"{label} (count)"] = int(series.notna().sum())
+            total_row[f"{label} (sum)"] = float(series.fillna(0.0).sum())
+        rows.append(total_row)
+
+    columns = ["Date"]
+    for _, label in metrics:
+        columns.extend([f"{label} (count)", f"{label} (sum)"])
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _period_totals(
     data_frame: pd.DataFrame,
     date_col: str,
@@ -324,6 +398,65 @@ def render() -> None:
     row2[2].metric("Collection Ratio", f"{collection_ratio:,.2f}")
     row2[3].metric("Production Entries", f"{production_entries}")
     row2[4].metric("Production Days", f"{production_days}")
+
+    st.subheader("FY Reconciliation Summary")
+    fy_years = _fy_years_from_dates(all_dates)
+    fy_labels = [_fy_label(year) for year in fy_years]
+    default_year = 2023 if 2023 in fy_years else fy_years[-1]
+    default_index = fy_years.index(default_year)
+    fy_choice = st.selectbox(
+        "Financial year",
+        fy_labels,
+        index=default_index,
+        key="recon_fy",
+    )
+    fy_start_year = fy_years[fy_labels.index(fy_choice)]
+    month_windows = _fy_month_windows(fy_start_year)
+    if month_windows:
+        st.caption(
+            f"{_fy_label(fy_start_year)} period: "
+            f"{month_windows[0]['start']:%d %b %Y} - {month_windows[-1]['end']:%d %b %Y}"
+        )
+    st.caption(
+        "Counts show number of records with numeric values. "
+        "Totals are sums for each month. Tables use full log data."
+    )
+
+    st.markdown("**Sales Log**")
+    sales_recon = _reconciliation_monthly_table(
+        sales,
+        "Date",
+        [
+            ("No_of_Bricks", "No_of_Bricks"),
+            ("Amount", "Amount"),
+            ("Amount_Received", "Amount_Received"),
+        ],
+        month_windows,
+    )
+    st.dataframe(sales_recon, width="stretch")
+
+    st.markdown("**Production Log**")
+    production_recon = _reconciliation_monthly_table(
+        production,
+        "Date",
+        [
+            ("No_of_Bricks", "No_of_Bricks"),
+            ("Cement_Consumption", "Cement_Consumption"),
+            ("No_of_Labour", "No_of_Labour"),
+            ("Labour_Expense", "Labour_Expense"),
+        ],
+        month_windows,
+    )
+    st.dataframe(production_recon, width="stretch")
+
+    st.markdown("**Raw Material Log**")
+    raw_recon = _reconciliation_monthly_table(
+        raw_materials,
+        "Date",
+        [("Qty", "Qty"), ("Total_Cost", "Total_Cost")],
+        month_windows,
+    )
+    st.dataframe(raw_recon, width="stretch")
 
     st.subheader("Cost & Profit Summary")
     raw_filtered["Material"] = raw_filtered["Material"].astype(str).str.strip().apply(
