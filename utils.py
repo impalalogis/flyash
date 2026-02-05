@@ -502,6 +502,326 @@ def generate_invoice_pdf(
     return buffer.read()
 
 
+def generate_customer_ledger_pdf(
+    ledger_df: pd.DataFrame,
+    customer_row: pd.Series,
+    company_info: dict[str, str],
+    branding: dict[str, object] | None = None,
+    *,
+    title: str = "Customer Ledger",
+    period_label: str = "",
+) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.colors import HexColor
+    from reportlab.graphics import renderPDF
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    branding = branding or {}
+    brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
+    logo_bytes = branding.get("logo_bytes")
+    signature_bytes = branding.get("signature_bytes")
+    watermark_text = str(branding.get("watermark_text", "")).strip() or company_info.get("name", "")
+    payment_details = branding.get("payment_details") or {}
+    qr_data = str(branding.get("qr_data", "")).strip()
+    payment_label = str(payment_details.get("label", "")).strip() or "Payment Details"
+
+    company_name = company_info.get("name", "Fly-Ash Brick Unit")
+    company_address = company_info.get("address", "")
+    company_contact = company_info.get("contact", "")
+    company_gst = company_info.get("gst", "")
+
+    ledger_df = ledger_df.copy() if ledger_df is not None else pd.DataFrame()
+    ledger_df = ledger_df.where(pd.notnull(ledger_df), "")
+
+    total_amount = float(
+        pd.to_numeric(ledger_df.get("Total_Amount", pd.Series(dtype=float)), errors="coerce")
+        .fillna(0.0)
+        .sum()
+    )
+    total_received = float(
+        pd.to_numeric(
+            ledger_df.get("Amount_Received", pd.Series(dtype=float)), errors="coerce"
+        )
+        .fillna(0.0)
+        .sum()
+    )
+    total_due = float(
+        pd.to_numeric(ledger_df.get("Due", pd.Series(dtype=float)), errors="coerce")
+        .fillna(0.0)
+        .sum()
+    )
+
+    def _format_date(value: object) -> str:
+        if isinstance(value, date):
+            return value.strftime("%d-%b-%Y")
+        if isinstance(value, datetime):
+            return value.date().strftime("%d-%b-%Y")
+        if value in ("", None):
+            return ""
+        parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
+        if pd.isna(parsed):
+            return str(value)
+        return parsed.date().strftime("%d-%b-%Y")
+
+    def _draw_logo() -> None:
+        if not logo_bytes:
+            return
+        try:
+            logo_reader = ImageReader(io.BytesIO(logo_bytes))
+            logo_width, logo_height = logo_reader.getSize()
+            max_width = 40 * mm
+            max_height = 20 * mm
+            scale = min(max_width / logo_width, max_height / logo_height)
+            render_width = logo_width * scale
+            render_height = logo_height * scale
+            pdf.drawImage(
+                logo_reader,
+                width - 20 * mm - render_width,
+                height - 25 * mm,
+                render_width,
+                render_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+        except Exception:
+            pass
+
+    def _draw_qr(qr_text: str) -> None:
+        if not qr_text:
+            return
+        try:
+            qr_size = 26 * mm
+            qr_widget = QrCodeWidget(qr_text)
+            bounds = qr_widget.getBounds()
+            qr_width = bounds[2] - bounds[0]
+            qr_height = bounds[3] - bounds[1]
+            drawing = Drawing(qr_size, qr_size)
+            drawing.add(
+                qr_widget,
+                transform=[
+                    qr_size / qr_width,
+                    0,
+                    0,
+                    qr_size / qr_height,
+                    0,
+                    0,
+                ],
+            )
+            qr_x = width - 20 * mm - qr_size
+            qr_y = 20 * mm
+            renderPDF.draw(drawing, pdf, qr_x, qr_y)
+        except Exception:
+            pass
+
+    def _draw_header() -> float:
+        if watermark_text:
+            pdf.saveState()
+            pdf.setFillColor(HexColor("#EEEEEE"))
+            pdf.setFont("Helvetica-Bold", 60)
+            pdf.translate(width / 2, height / 2)
+            pdf.rotate(35)
+            pdf.drawCentredString(0, 0, watermark_text)
+            pdf.restoreState()
+
+        header_height = 18 * mm
+        pdf.setFillColor(HexColor(brand_color))
+        pdf.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
+        pdf.setFillColor(HexColor("#FFFFFF"))
+        pdf.setFont("Helvetica-Bold", 14)
+        pdf.drawString(20 * mm, height - 12 * mm, company_name)
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawRightString(width - 20 * mm, height - 12 * mm, title)
+        _draw_logo()
+
+        pdf.setFillColor(HexColor("#000000"))
+        pdf.setFont("Helvetica", 9)
+        y = height - 32 * mm
+        if company_address:
+            pdf.drawString(20 * mm, y, company_address)
+            y -= 4 * mm
+        if company_contact:
+            pdf.drawString(20 * mm, y, f"Contact: {company_contact}")
+            y -= 4 * mm
+        if company_gst:
+            pdf.drawString(20 * mm, y, f"GST: {company_gst}")
+            y -= 6 * mm
+
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(20 * mm, y, "Customer Details")
+        y -= 5 * mm
+        pdf.setFont("Helvetica", 9)
+        customer_name = str(customer_row.get("Name", "")).strip()
+        customer_id = str(customer_row.get("Customer_ID", "")).strip()
+        customer_contact = str(customer_row.get("Contact", "")).strip()
+        customer_address = str(customer_row.get("Address", "")).strip()
+        if customer_name:
+            pdf.drawString(20 * mm, y, f"Name: {customer_name}")
+            y -= 4 * mm
+        if customer_id:
+            pdf.drawString(20 * mm, y, f"Customer ID: {customer_id}")
+            y -= 4 * mm
+        if customer_contact:
+            pdf.drawString(20 * mm, y, f"Contact: {customer_contact}")
+            y -= 4 * mm
+        if customer_address:
+            pdf.drawString(20 * mm, y, f"Address: {customer_address}")
+            y -= 4 * mm
+
+        summary_y = height - 60 * mm
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawRightString(
+            width - 20 * mm,
+            summary_y,
+            f"Total Amount: {total_amount:,.2f}",
+        )
+        pdf.drawRightString(
+            width - 20 * mm,
+            summary_y - 4 * mm,
+            f"Total Received: {total_received:,.2f}",
+        )
+        pdf.drawRightString(
+            width - 20 * mm,
+            summary_y - 8 * mm,
+            f"Outstanding: {total_due:,.2f}",
+        )
+        if period_label:
+            pdf.setFont("Helvetica", 8)
+            pdf.drawRightString(
+                width - 20 * mm,
+                summary_y - 12 * mm,
+                f"Period: {period_label}",
+            )
+
+        return height - 95 * mm
+
+    def _draw_footer() -> None:
+        footer_y = 15 * mm
+        if payment_details:
+            pdf.setFont("Helvetica-Bold", 8)
+            pdf.drawString(20 * mm, footer_y + 10 * mm, payment_label)
+            pdf.setFont("Helvetica", 8)
+            lines = []
+            if payment_details.get("upi_id"):
+                lines.append(f"UPI: {payment_details.get('upi_id')}")
+            if payment_details.get("bank_name"):
+                lines.append(f"Bank: {payment_details.get('bank_name')}")
+            if payment_details.get("account_no"):
+                lines.append(f"A/C: {payment_details.get('account_no')}")
+            if payment_details.get("ifsc"):
+                lines.append(f"IFSC: {payment_details.get('ifsc')}")
+            if payment_details.get("note"):
+                lines.append(str(payment_details.get("note")))
+            y = footer_y + 6 * mm
+            for line in lines[:5]:
+                pdf.drawString(20 * mm, y, line)
+                y -= 4 * mm
+
+        if signature_bytes:
+            try:
+                sig_reader = ImageReader(io.BytesIO(signature_bytes))
+                sig_width, sig_height = sig_reader.getSize()
+                max_width = 40 * mm
+                max_height = 15 * mm
+                scale = min(max_width / sig_width, max_height / sig_height)
+                render_width = sig_width * scale
+                render_height = sig_height * scale
+                pdf.drawImage(
+                    sig_reader,
+                    width - 60 * mm,
+                    footer_y + 2 * mm,
+                    render_width,
+                    render_height,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+                pdf.setFont("Helvetica", 8)
+                pdf.drawString(width - 60 * mm, footer_y - 2 * mm, "Authorized Signatory")
+            except Exception:
+                pass
+
+        _draw_qr(qr_data)
+
+    columns = [
+        ("Date", 18 * mm, "left"),
+        ("Invoice", 32 * mm, "left"),
+        ("Bricks", 18 * mm, "right"),
+        ("Amount", 18 * mm, "right"),
+        ("Freight", 16 * mm, "right"),
+        ("Total", 20 * mm, "right"),
+        ("Received", 22 * mm, "right"),
+        ("Due", 18 * mm, "right"),
+    ]
+    table_width = sum(width for _, width, _ in columns)
+    left_x = 15 * mm
+    row_height = 6 * mm
+    footer_reserved = 30 * mm if (payment_details or qr_data or signature_bytes) else 18 * mm
+    bottom_limit = footer_reserved + 10 * mm
+
+    def _draw_table_header(y: float) -> float:
+        pdf.setFillColor(HexColor("#F2F2F2"))
+        pdf.rect(left_x, y - 4 * mm, table_width, 6 * mm, fill=1, stroke=0)
+        pdf.setFillColor(HexColor("#000000"))
+        pdf.setFont("Helvetica-Bold", 8)
+        x = left_x + 1 * mm
+        for label, width, align in columns:
+            if align == "right":
+                pdf.drawRightString(x + width - 1 * mm, y, label)
+            else:
+                pdf.drawString(x, y, label)
+            x += width
+        return y - row_height
+
+    y_position = _draw_header()
+    y_position = _draw_table_header(y_position)
+
+    if ledger_df.empty:
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(left_x, y_position - 2 * mm, "No ledger entries found.")
+        _draw_footer()
+    else:
+        pdf.setFont("Helvetica", 8)
+        for _, row in ledger_df.iterrows():
+            if y_position < bottom_limit:
+                _draw_footer()
+                pdf.showPage()
+                y_position = _draw_header()
+                y_position = _draw_table_header(y_position)
+            values = {
+                "Date": _format_date(row.get("Date", "")),
+                "Invoice": str(row.get("Invoice", "")).strip(),
+                "Bricks": f"{safe_float(row.get('No_of_Bricks', 0)):,.0f}",
+                "Amount": f"{safe_float(row.get('Amount', 0)):,.2f}",
+                "Freight": f"{safe_float(row.get('Freight', 0)):,.2f}",
+                "Total": f"{safe_float(row.get('Total_Amount', 0)):,.2f}",
+                "Received": f"{safe_float(row.get('Amount_Received', 0)):,.2f}",
+                "Due": f"{safe_float(row.get('Due', 0)):,.2f}",
+            }
+            x = left_x + 1 * mm
+            for label, width, align in columns:
+                text = values.get(label, "")
+                if align == "right":
+                    pdf.drawRightString(x + width - 1 * mm, y_position, text)
+                else:
+                    pdf.drawString(x, y_position, text[:28])
+                x += width
+            y_position -= row_height
+
+        _draw_footer()
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.read()
+
+
 def canonical_material_label(value: object) -> str:
     raw = str(value or "").strip()
     key = re.sub(r"[^a-z]", "", raw.lower())
