@@ -675,108 +675,124 @@ def render() -> None:
             if only_outstanding:
                 ledger_filtered = ledger_filtered[ledger_filtered["Due"] > 0]
 
-            if ledger_filtered.empty:
-                st.info("No ledger entries for the selected filters.")
-            else:
-                ledger_filtered = ledger_filtered.sort_values("Date")
-                ledger_filtered["Invoice"] = (
-                    ledger_filtered.get("Invoice_No", pd.Series(dtype=str))
-                    .astype(str)
-                    .str.strip()
-                )
-                ledger_filtered["Invoice"] = ledger_filtered["Invoice"].where(
-                    ledger_filtered["Invoice"] != "",
-                    ledger_filtered.get("Sales_ID", pd.Series(dtype=str)).astype(str),
-                )
+            ledger_key = f"{ledger_customer_id}|{start_date}|{end_date}|{only_outstanding}"
+            if st.session_state.get("ledger_generated_key") != ledger_key:
+                st.session_state["ledger_generated"] = False
+                st.session_state["ledger_generated_key"] = ledger_key
 
-                total_amount = float(ledger_filtered["Total_Amount"].sum())
-                total_received = float(ledger_filtered["Amount_Received"].sum())
-                total_due = float(ledger_filtered["Due"].sum())
+            generate = st.button("Generate Ledger", key="ledger_generate")
+            if generate:
+                st.session_state["ledger_generated"] = True
 
-                summary_cols = st.columns(3)
-                summary_cols[0].metric("Total Amount", f"{total_amount:,.2f}")
-                summary_cols[1].metric("Total Received", f"{total_received:,.2f}")
-                summary_cols[2].metric("Outstanding", f"{total_due:,.2f}")
-
-                ledger_view = ledger_filtered[
-                    [
-                        "Date",
-                        "Invoice",
-                        "Destination",
-                        "No_of_Bricks",
-                        "Amount",
-                        "Freight",
-                        "Total_Amount",
-                        "Amount_Received",
-                        "Due",
-                        "Payment_Mode",
-                        "Payment_Date",
-                    ]
-                ].rename(
-                    columns={
-                        "No_of_Bricks": "Bricks",
-                        "Total_Amount": "Total Amount",
-                        "Amount_Received": "Amount Received",
-                        "Payment_Mode": "Payment Mode",
-                        "Payment_Date": "Payment Date",
-                    }
-                )
-                st.dataframe(ledger_view, width="stretch")
-
-                file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    ledger_view.to_excel(writer, index=False, sheet_name="Ledger")
-                    summary_df = pd.DataFrame(
-                        [
-                            {
-                                "Customer": ledger_customer_label,
-                                "Start_Date": start_date,
-                                "End_Date": end_date,
-                                "Total_Amount": total_amount,
-                                "Total_Received": total_received,
-                                "Outstanding": total_due,
-                            }
-                        ]
+            if st.session_state.get("ledger_generated"):
+                if ledger_filtered.empty:
+                    st.info(
+                        "No ledger entries match the selected customer, date range, "
+                        "and outstanding filter. Try expanding the date range or "
+                        "turn off 'Only show outstanding invoices'."
                     )
-                    summary_df.to_excel(writer, index=False, sheet_name="Summary")
-                st.download_button(
-                    "Download Ledger (Excel)",
-                    data=output.getvalue(),
-                    file_name=f"ledger_{file_label}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                else:
+                    ledger_filtered = ledger_filtered.sort_values("Date")
+                    ledger_filtered["Invoice"] = (
+                        ledger_filtered.get("Invoice_No", pd.Series(dtype=str))
+                        .astype(str)
+                        .str.strip()
+                    )
+                    ledger_filtered["Invoice"] = ledger_filtered["Invoice"].where(
+                        ledger_filtered["Invoice"] != "",
+                        ledger_filtered.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+                    )
 
-                company_info, branding = _resolve_invoice_settings(
-                    company_defaults, branding_defaults, payment_defaults
-                )
-                period_label = f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"
-                pdf_rows = ledger_filtered[
-                    [
-                        "Date",
-                        "Invoice",
-                        "No_of_Bricks",
-                        "Amount",
-                        "Freight",
-                        "Total_Amount",
-                        "Amount_Received",
-                        "Due",
-                    ]
-                ].copy()
-                pdf_bytes = utils.generate_customer_ledger_pdf(
-                    pdf_rows,
-                    customer_row,
-                    company_info,
-                    branding,
-                    title="Customer Ledger",
-                    period_label=period_label,
-                )
-                st.download_button(
-                    "Download Ledger (PDF)",
-                    data=pdf_bytes,
-                    file_name=f"ledger_{file_label}.pdf",
-                    mime="application/pdf",
-                )
+                    total_amount = float(ledger_filtered["Total_Amount"].sum())
+                    total_received = float(ledger_filtered["Amount_Received"].sum())
+                    total_due = float(ledger_filtered["Due"].sum())
+
+                    summary_cols = st.columns(3)
+                    summary_cols[0].metric("Total Amount", f"{total_amount:,.2f}")
+                    summary_cols[1].metric("Total Received", f"{total_received:,.2f}")
+                    summary_cols[2].metric("Outstanding", f"{total_due:,.2f}")
+
+                    ledger_view = ledger_filtered[
+                        [
+                            "Date",
+                            "Invoice",
+                            "Destination",
+                            "No_of_Bricks",
+                            "Amount",
+                            "Freight",
+                            "Total_Amount",
+                            "Amount_Received",
+                            "Due",
+                            "Payment_Mode",
+                            "Payment_Date",
+                        ]
+                    ].rename(
+                        columns={
+                            "No_of_Bricks": "Bricks",
+                            "Total_Amount": "Total Amount",
+                            "Amount_Received": "Amount Received",
+                            "Payment_Mode": "Payment Mode",
+                            "Payment_Date": "Payment Date",
+                        }
+                    )
+                    st.dataframe(ledger_view, width="stretch")
+
+                    file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                        ledger_view.to_excel(writer, index=False, sheet_name="Ledger")
+                        summary_df = pd.DataFrame(
+                            [
+                                {
+                                    "Customer": ledger_customer_label,
+                                    "Start_Date": start_date,
+                                    "End_Date": end_date,
+                                    "Total_Amount": total_amount,
+                                    "Total_Received": total_received,
+                                    "Outstanding": total_due,
+                                }
+                            ]
+                        )
+                        summary_df.to_excel(writer, index=False, sheet_name="Summary")
+                    st.download_button(
+                        "Download Ledger (Excel)",
+                        data=output.getvalue(),
+                        file_name=f"ledger_{file_label}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+
+                    company_info, branding = _resolve_invoice_settings(
+                        company_defaults, branding_defaults, payment_defaults
+                    )
+                    period_label = f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"
+                    pdf_rows = ledger_filtered[
+                        [
+                            "Date",
+                            "Invoice",
+                            "No_of_Bricks",
+                            "Amount",
+                            "Freight",
+                            "Total_Amount",
+                            "Amount_Received",
+                            "Due",
+                        ]
+                    ].copy()
+                    pdf_bytes = utils.generate_customer_ledger_pdf(
+                        pdf_rows,
+                        customer_row,
+                        company_info,
+                        branding,
+                        title="Customer Ledger",
+                        period_label=period_label,
+                    )
+                    st.download_button(
+                        "Download Ledger (PDF)",
+                        data=pdf_bytes,
+                        file_name=f"ledger_{file_label}.pdf",
+                        mime="application/pdf",
+                    )
+            else:
+                st.caption("Select filters above and click Generate Ledger.")
 
     if SHOW_VALIDATION and has_entries:
         st.subheader("Validation")
