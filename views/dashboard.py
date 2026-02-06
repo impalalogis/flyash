@@ -659,15 +659,25 @@ def render() -> None:
             st.info("No customer data available.")
         else:
             sales_outstanding = sales.copy()
-            sales_outstanding["Amount"] = utils.to_numeric_series(
-                sales_outstanding.get("Amount", pd.Series(dtype=float))
+            sales_outstanding["Total_Amount"] = utils.to_numeric_series(
+                sales_outstanding.get("Total_Amount", pd.Series(dtype=float))
             ).fillna(0.0)
             sales_outstanding["Amount_Received"] = utils.to_numeric_series(
                 sales_outstanding.get("Amount_Received", pd.Series(dtype=float))
             ).fillna(0.0)
-            sales_outstanding["Outstanding"] = (
-                sales_outstanding["Amount"] - sales_outstanding["Amount_Received"]
-            )
+            if "Dues" in sales_outstanding.columns:
+                sales_outstanding["Outstanding"] = utils.to_numeric_series(
+                    sales_outstanding.get("Dues", pd.Series(dtype=float))
+                ).fillna(0.0)
+            elif "Due" in sales_outstanding.columns:
+                sales_outstanding["Outstanding"] = utils.to_numeric_series(
+                    sales_outstanding.get("Due", pd.Series(dtype=float))
+                ).fillna(0.0)
+            else:
+                sales_outstanding["Outstanding"] = (
+                    sales_outstanding["Total_Amount"]
+                    - sales_outstanding["Amount_Received"]
+                )
             outstanding_by_customer = (
                 sales_outstanding.groupby("Customer_ID", dropna=False)["Outstanding"]
                 .sum()
