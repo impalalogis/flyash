@@ -214,7 +214,8 @@ def render() -> None:
     st.header("Payments")
     st.caption(
         "Invoice No is optional. Use it when the payment matches a single sale; "
-        "leave it blank for combined payments, partials, or advances."
+        "leave it blank for combined payments, partials, or advances. "
+        "Reconciliation runs only when you click Run reconciliation."
     )
 
     customers = database.read_table("Customers")
@@ -280,15 +281,6 @@ def render() -> None:
                 secondary_col="Payment_ID",
             )
             database.replace_table("Payments", payments_sorted, recompute_stock=False)
-
-            payments_after = database.read_table("Payments")
-            sales_after = database.read_table("Sales_Log")
-            reconciled_payments, reconciled_sales = _reconcile_payments(
-                payments_after,
-                sales_after,
-            )
-            database.replace_table("Payments", reconciled_payments, recompute_stock=False)
-            database.replace_table("Sales_Log", reconciled_sales, recompute_stock=False)
 
             outstanding = 0.0
             customer_row = customers.loc[customers["Customer_ID"] == customer_id]
