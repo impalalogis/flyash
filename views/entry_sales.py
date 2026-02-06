@@ -36,7 +36,6 @@ SALES_COLUMNS = [
     "Payment_Mode",
     "Payment_Date",
     "Payment_ID",
-    "Due",
     "Dues",
     "Invoice_No",
 ]
@@ -90,11 +89,7 @@ def _fy_label_short(value: date) -> str:
 
 
 def _sales_due_label(entries: pd.DataFrame) -> str:
-    if "Dues" in entries.columns:
-        return "Dues"
-    if "Due" in entries.columns:
-        return "Due"
-    return "Due"
+    return "Dues"
 
 
 def _parse_date(value: object) -> date | None:
@@ -154,12 +149,6 @@ def _payment_applied_amount(row: pd.Series) -> float:
     status = str(row.get("Payment_Status", "")).strip().lower()
     if status == "pending":
         return 0.0
-    if status == "settled":
-        return amount_paid
-    if status == "partially settled":
-        return max(amount_paid - remaining, 0.0)
-    if remaining > 0:
-        return max(amount_paid - remaining, 0.0)
     return amount_paid
 
 
@@ -631,7 +620,6 @@ def render() -> None:
                 "Payment_Mode": payment_mode,
                 "Payment_Date": payment_date.isoformat(),
                 "Payment_ID": "",
-                "Due": total_amount - amount_received,
                 "Dues": total_amount - amount_received,
                 "Invoice_No": invoice_no_final,
             }
@@ -670,7 +658,6 @@ def render() -> None:
             "Freight",
             "Total_Amount",
             "Amount_Received",
-            "Due",
             "Dues",
         ]
         entries = utils.coerce_numeric_columns(entries, numeric_columns)
@@ -1127,8 +1114,6 @@ def render() -> None:
             "Total_Amount": {"numeric": True, "min": 0},
             "Amount_Received": {"numeric": True, "min": 0},
         }
-        if "Due" in entries.columns:
-            rules["Due"] = {"numeric": True}
         if "Dues" in entries.columns:
             rules["Dues"] = {"numeric": True}
         mask, errors = utils.build_validation_mask(entries, rules)
@@ -1151,7 +1136,7 @@ def render() -> None:
         mask = utils.apply_invalid_mask(
             mask, "Total_Amount", (total_amount - calc_total).abs() > 0.01
         )
-        for due_col in ["Due", "Dues"]:
+        for due_col in ["Dues"]:
             if due_col not in entries.columns:
                 continue
             due_series = pd.to_numeric(entries.get(due_col, pd.Series(dtype=float)), errors="coerce")
@@ -1204,7 +1189,6 @@ def render() -> None:
                     data = row.to_dict()
                     data["Amount"] = amount_new
                     data["Total_Amount"] = total_new
-                    data["Due"] = total_new - received_new
                     data["Dues"] = total_new - received_new
                     entry_date = _parse_date(row.get("Date", ""))
                     if entry_date:

@@ -388,7 +388,6 @@ def render() -> None:
             "Freight",
             "Total_Amount",
             "Amount_Received",
-            "Due",
             "Dues",
         ],
     )
@@ -668,10 +667,6 @@ def render() -> None:
             if "Dues" in sales_outstanding.columns:
                 sales_outstanding["Outstanding"] = utils.to_numeric_series(
                     sales_outstanding.get("Dues", pd.Series(dtype=float))
-                ).fillna(0.0)
-            elif "Due" in sales_outstanding.columns:
-                sales_outstanding["Outstanding"] = utils.to_numeric_series(
-                    sales_outstanding.get("Due", pd.Series(dtype=float))
                 ).fillna(0.0)
             else:
                 sales_outstanding["Outstanding"] = (
@@ -2097,7 +2092,6 @@ def render() -> None:
                 "No_of_Bricks",
                 "GST",
                 "Gst (%12)",
-                "Due",
                 "Dues",
             ],
         )
