@@ -106,9 +106,8 @@ def _reconcile_payments(
     payments_df["Payment_Status"] = payments_df.get(
         "Payment_Status", pd.Series(dtype=str)
     ).astype(str)
-    pending_mask = payments_df["Payment_Status"].str.strip().str.lower().isin(
-        ["pending", ""]
-    )
+    status_series = payments_df["Payment_Status"].str.strip().str.lower()
+    pending_mask = ~status_series.isin(["settled", "partially settled"])
     pending_payments = payments_df[pending_mask & (payments_df["Amount_Paid"] > 0)].copy()
 
     sales_dates = utils.parse_date_series(
