@@ -154,12 +154,6 @@ def _payment_applied_amount(row: pd.Series) -> float:
     status = str(row.get("Payment_Status", "")).strip().lower()
     if status == "pending":
         return 0.0
-    if status == "settled":
-        return amount_paid
-    if status == "partially settled":
-        return max(amount_paid - remaining, 0.0)
-    if remaining > 0:
-        return max(amount_paid - remaining, 0.0)
     return amount_paid
 
 
