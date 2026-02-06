@@ -44,6 +44,120 @@ def coerce_numeric_columns(data_frame: pd.DataFrame, columns: Iterable[str]) -> 
     return data_frame
 
 
+def _month_hint_number(value: object) -> int | None:
+    if isinstance(value, datetime):
+        return value.month
+    if isinstance(value, date):
+        return value.month
+    value_str = str(value or "").strip()
+    if not value_str:
+        return None
+    cleaned = re.sub(r"[^a-z]", "", value_str.lower())
+    month_map = {
+        "jan": 1,
+        "january": 1,
+        "feb": 2,
+        "february": 2,
+        "mar": 3,
+        "march": 3,
+        "apr": 4,
+        "april": 4,
+        "may": 5,
+        "jun": 6,
+        "june": 6,
+        "jul": 7,
+        "july": 7,
+        "aug": 8,
+        "august": 8,
+        "sep": 9,
+        "sept": 9,
+        "september": 9,
+        "oct": 10,
+        "october": 10,
+        "nov": 11,
+        "november": 11,
+        "dec": 12,
+        "december": 12,
+    }
+    if cleaned in month_map:
+        return month_map[cleaned]
+    if len(cleaned) >= 3 and cleaned[:3] in month_map:
+        return month_map[cleaned[:3]]
+    digits = re.sub(r"\D", "", value_str)
+    if digits:
+        try:
+            month = int(digits)
+        except ValueError:
+            return None
+        return month if 1 <= month <= 12 else None
+    return None
+
+
+def parse_date_series(
+    series: pd.Series,
+    *,
+    dayfirst: bool = True,
+    month_hint: pd.Series | None = None,
+) -> pd.Series:
+    parsed_dayfirst = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst)
+    if month_hint is None:
+        if parsed_dayfirst.isna().any():
+            parsed_monthfirst = pd.to_datetime(
+                series, errors="coerce", dayfirst=not dayfirst
+            )
+            parsed_dayfirst = parsed_dayfirst.fillna(parsed_monthfirst)
+        return parsed_dayfirst
+
+    parsed_monthfirst = pd.to_datetime(series, errors="coerce", dayfirst=not dayfirst)
+    hint_months = pd.to_numeric(month_hint.apply(_month_hint_number), errors="coerce")
+    day_month = parsed_dayfirst.dt.month
+    month_month = parsed_monthfirst.dt.month
+    use_monthfirst = parsed_monthfirst.notna() & (
+        parsed_dayfirst.isna()
+        | (
+            hint_months.notna()
+            & (day_month != hint_months)
+            & (month_month == hint_months)
+        )
+    )
+    parsed = parsed_dayfirst.where(~use_monthfirst, parsed_monthfirst)
+    return parsed.fillna(parsed_monthfirst)
+
+
+def sales_expected_due_series(data_frame: pd.DataFrame) -> pd.Series:
+    total = to_numeric_series(
+        data_frame.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    received = to_numeric_series(
+        data_frame.get("Amount_Received", pd.Series(dtype=float))
+    ).fillna(0.0)
+    return total - received
+
+
+def sales_due_sign(data_frame: pd.DataFrame, column: str) -> int:
+    if data_frame.empty or column not in data_frame.columns:
+        return -1 if column.strip().lower() == "dues" else 1
+    expected = sales_expected_due_series(data_frame)
+    due = to_numeric_series(data_frame.get(column, pd.Series(dtype=float)))
+    valid = due.notna()
+    if not valid.any():
+        return -1 if column.strip().lower() == "dues" else 1
+    diff_expected = (due[valid] - expected[valid]).abs().mean()
+    diff_inverted = (due[valid] + expected[valid]).abs().mean()
+    return -1 if diff_inverted < diff_expected else 1
+
+
+def sales_due_for_column(
+    data_frame: pd.DataFrame,
+    total_amount: float,
+    amount_received: float,
+    *,
+    column: str,
+) -> float:
+    sign = sales_due_sign(data_frame, column) if column in data_frame.columns else 1
+    return (total_amount - amount_received) * sign
+
+
 def payment_week_range(entry_date: date, weeks: int) -> tuple[date, date, str]:
     weeks = max(1, int(weeks))
     week_start = entry_date - timedelta(days=entry_date.weekday())
@@ -540,24 +654,48 @@ def generate_customer_ledger_pdf(
 
     ledger_df = ledger_df.copy() if ledger_df is not None else pd.DataFrame()
     ledger_df = ledger_df.where(pd.notnull(ledger_df), "")
+    ledger_mode = {"Type", "Debit", "Credit"}.issubset(ledger_df.columns)
 
-    total_amount = float(
-        pd.to_numeric(ledger_df.get("Total_Amount", pd.Series(dtype=float)), errors="coerce")
-        .fillna(0.0)
-        .sum()
-    )
-    total_received = float(
-        pd.to_numeric(
-            ledger_df.get("Amount_Received", pd.Series(dtype=float)), errors="coerce"
+    if ledger_mode:
+        debit_series = pd.to_numeric(
+            ledger_df.get("Debit", pd.Series(dtype=float)), errors="coerce"
+        ).fillna(0.0)
+        credit_series = pd.to_numeric(
+            ledger_df.get("Credit", pd.Series(dtype=float)), errors="coerce"
+        ).fillna(0.0)
+        total_amount = float(debit_series.sum())
+        total_received = float(credit_series.sum())
+        running_col = (
+            "Running_Balance"
+            if "Running_Balance" in ledger_df.columns
+            else "Running Balance"
         )
-        .fillna(0.0)
-        .sum()
-    )
-    total_due = float(
-        pd.to_numeric(ledger_df.get("Due", pd.Series(dtype=float)), errors="coerce")
-        .fillna(0.0)
-        .sum()
-    )
+        running_series = pd.to_numeric(
+            ledger_df.get(running_col, pd.Series(dtype=float)), errors="coerce"
+        ).dropna()
+        total_due = float(running_series.iloc[-1]) if not running_series.empty else 0.0
+    else:
+        total_amount = float(
+            pd.to_numeric(
+                ledger_df.get("Total_Amount", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .sum()
+        )
+        total_received = float(
+            pd.to_numeric(
+                ledger_df.get("Amount_Received", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .sum()
+        )
+        total_due = float(
+            pd.to_numeric(ledger_df.get("Due", pd.Series(dtype=float)), errors="coerce")
+            .fillna(0.0)
+            .sum()
+        )
 
     def _format_date(value: object) -> str:
         if isinstance(value, date):
@@ -677,15 +815,17 @@ def generate_customer_ledger_pdf(
 
         summary_y = height - 60 * mm
         pdf.setFont("Helvetica-Bold", 9)
+        amount_label = "Total Sales" if ledger_mode else "Total Amount"
+        received_label = "Total Payments" if ledger_mode else "Total Received"
         pdf.drawRightString(
             width - 20 * mm,
             summary_y,
-            f"Total Amount: {total_amount:,.2f}",
+            f"{amount_label}: {total_amount:,.2f}",
         )
         pdf.drawRightString(
             width - 20 * mm,
             summary_y - 4 * mm,
-            f"Total Received: {total_received:,.2f}",
+            f"{received_label}: {total_received:,.2f}",
         )
         pdf.drawRightString(
             width - 20 * mm,
@@ -749,16 +889,27 @@ def generate_customer_ledger_pdf(
 
         _draw_qr(qr_data)
 
-    columns = [
-        ("Date", 18 * mm, "left"),
-        ("Invoice", 32 * mm, "left"),
-        ("Bricks", 18 * mm, "right"),
-        ("Amount", 18 * mm, "right"),
-        ("Freight", 16 * mm, "right"),
-        ("Total", 20 * mm, "right"),
-        ("Received", 22 * mm, "right"),
-        ("Due", 18 * mm, "right"),
-    ]
+    if ledger_mode:
+        columns = [
+            ("Date", 18 * mm, "left"),
+            ("Type", 16 * mm, "left"),
+            ("Reference", 28 * mm, "left"),
+            ("Description", 48 * mm, "left"),
+            ("Debit", 18 * mm, "right"),
+            ("Credit", 18 * mm, "right"),
+            ("Balance", 20 * mm, "right"),
+        ]
+    else:
+        columns = [
+            ("Date", 18 * mm, "left"),
+            ("Invoice", 32 * mm, "left"),
+            ("Bricks", 18 * mm, "right"),
+            ("Amount", 18 * mm, "right"),
+            ("Freight", 16 * mm, "right"),
+            ("Total", 20 * mm, "right"),
+            ("Received", 22 * mm, "right"),
+            ("Due", 18 * mm, "right"),
+        ]
     table_width = sum(width for _, width, _ in columns)
     left_x = 15 * mm
     row_height = 6 * mm
@@ -794,16 +945,32 @@ def generate_customer_ledger_pdf(
                 pdf.showPage()
                 y_position = _draw_header()
                 y_position = _draw_table_header(y_position)
-            values = {
-                "Date": _format_date(row.get("Date", "")),
-                "Invoice": str(row.get("Invoice", "")).strip(),
-                "Bricks": f"{safe_float(row.get('No_of_Bricks', 0)):,.0f}",
-                "Amount": f"{safe_float(row.get('Amount', 0)):,.2f}",
-                "Freight": f"{safe_float(row.get('Freight', 0)):,.2f}",
-                "Total": f"{safe_float(row.get('Total_Amount', 0)):,.2f}",
-                "Received": f"{safe_float(row.get('Amount_Received', 0)):,.2f}",
-                "Due": f"{safe_float(row.get('Due', 0)):,.2f}",
-            }
+            if ledger_mode:
+                balance_col = (
+                    "Running_Balance"
+                    if "Running_Balance" in ledger_df.columns
+                    else "Running Balance"
+                )
+                values = {
+                    "Date": _format_date(row.get("Date", "")),
+                    "Type": str(row.get("Type", "")).strip(),
+                    "Reference": str(row.get("Reference", "")).strip(),
+                    "Description": str(row.get("Description", "")).strip(),
+                    "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
+                    "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
+                    "Balance": f"{safe_float(row.get(balance_col, 0)):,.2f}",
+                }
+            else:
+                values = {
+                    "Date": _format_date(row.get("Date", "")),
+                    "Invoice": str(row.get("Invoice", "")).strip(),
+                    "Bricks": f"{safe_float(row.get('No_of_Bricks', 0)):,.0f}",
+                    "Amount": f"{safe_float(row.get('Amount', 0)):,.2f}",
+                    "Freight": f"{safe_float(row.get('Freight', 0)):,.2f}",
+                    "Total": f"{safe_float(row.get('Total_Amount', 0)):,.2f}",
+                    "Received": f"{safe_float(row.get('Amount_Received', 0)):,.2f}",
+                    "Due": f"{safe_float(row.get('Due', 0)):,.2f}",
+                }
             x = left_x + 1 * mm
             for label, width, align in columns:
                 text = values.get(label, "")

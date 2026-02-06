@@ -120,11 +120,15 @@ Notes:
 **Sales_Log**
 - Sales_ID
 - Date
+- Fiscal
+- Fiscal_Year
+- Year
 - Month
 - Customer_ID
 - Destination
 - No_of_Bricks
 - Rate
+- Gst (%12)
 - Amount
 - Freight
 - Transport_Party
@@ -134,8 +138,16 @@ Notes:
 - Amount_Received
 - Payment_Mode
 - Payment_Date
-- Due
+- Payment_ID
+- Dues
 - Invoice_No
+
+Notes:
+- Fiscal stores FY labels like "FY23-24".
+- Fiscal_Year mirrors Fiscal for compatibility with accounting exports.
+- If your sheet uses `Due` instead of `Dues`, the app handles both.
+- `Gst (%12)` stores the GST amount (12% by default).
+- Invoice_No is auto-generated as `INV-ddmmyyyy-####` if left blank.
 
 **Payments**
 - Payment_ID
@@ -145,6 +157,11 @@ Notes:
 - Date
 - Mode
 - Payment_Status
+- Remaining_Amount
+
+Notes:
+- Invoice_No is optional (use for single-invoice payments; leave blank for advances or combined payments).
+- Payment_Status is set to Pending on entry; reconciliation updates it to Settled/Partially Settled.
 
 **Bank_Statement**
 - Txn_ID

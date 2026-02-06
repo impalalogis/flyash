@@ -14,10 +14,10 @@ def _parse_dates(data_frame: pd.DataFrame, column: str) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
     data_frame = data_frame.copy()
-    data_frame[column] = pd.to_datetime(
+    month_hint = data_frame["Month"] if "Month" in data_frame.columns else None
+    data_frame[column] = utils.parse_date_series(
         data_frame[column],
-        errors="coerce",
-        dayfirst=True,
+        month_hint=month_hint,
     ).dt.date
     return data_frame
 
@@ -25,7 +25,8 @@ def _parse_dates(data_frame: pd.DataFrame, column: str) -> pd.DataFrame:
 def _filter_by_date(data_frame: pd.DataFrame, column: str, start: date, end: date) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
-    series = pd.to_datetime(data_frame[column], errors="coerce", dayfirst=True)
+    month_hint = data_frame["Month"] if "Month" in data_frame.columns else None
+    series = utils.parse_date_series(data_frame[column], month_hint=month_hint)
     start_ts = pd.to_datetime(start)
     end_ts = pd.to_datetime(end)
     return data_frame[(series >= start_ts) & (series <= end_ts)]
@@ -92,10 +93,10 @@ def _reconciliation_monthly_table(
     *,
     total_label: str = "FY Total",
 ) -> pd.DataFrame:
-    dt = pd.to_datetime(
+    month_hint = data_frame["Month"] if "Month" in data_frame.columns else None
+    dt = utils.parse_date_series(
         data_frame.get(date_col, pd.Series(dtype=str)),
-        errors="coerce",
-        dayfirst=True,
+        month_hint=month_hint,
     )
     rows: list[dict[str, float | int | str]] = []
     for window in month_windows:
@@ -149,10 +150,10 @@ def _reconciliation_raw_material_table(
     frame["Material"] = frame.get("Material", pd.Series(dtype=str)).astype(str).str.strip().apply(
         utils.canonical_material_label
     )
-    dt = pd.to_datetime(
+    month_hint = frame["Month"] if "Month" in frame.columns else None
+    dt = utils.parse_date_series(
         frame.get("Date", pd.Series(dtype=str)),
-        errors="coerce",
-        dayfirst=True,
+        month_hint=month_hint,
     )
 
     def _material_row(subset: pd.DataFrame, material: str) -> tuple[int, float]:
@@ -381,11 +382,14 @@ def render() -> None:
         [
             "No_of_Bricks",
             "Rate",
+            "GST",
+            "Gst (%12)",
             "Amount",
             "Freight",
             "Total_Amount",
             "Amount_Received",
             "Due",
+            "Dues",
         ],
     )
     stock_log = _parse_dates(database.read_table("Stock_Log"), "Date")
@@ -464,15 +468,15 @@ def render() -> None:
     collection_ratio = (total_received / total_sales) if total_sales else 0.0
 
     if scope == "Full data":
-        invalid_sales_dates = pd.to_datetime(
+        sales_month_hint = sales["Month"] if "Month" in sales.columns else None
+        prod_month_hint = production["Month"] if "Month" in production.columns else None
+        invalid_sales_dates = utils.parse_date_series(
             sales.get("Date", pd.Series(dtype=str)),
-            errors="coerce",
-            dayfirst=True,
+            month_hint=sales_month_hint,
         ).isna()
-        invalid_prod_dates = pd.to_datetime(
+        invalid_prod_dates = utils.parse_date_series(
             production.get("Date", pd.Series(dtype=str)),
-            errors="coerce",
-            dayfirst=True,
+            month_hint=prod_month_hint,
         ).isna()
         if invalid_sales_dates.any() or invalid_prod_dates.any():
             st.caption(
@@ -655,15 +659,25 @@ def render() -> None:
             st.info("No customer data available.")
         else:
             sales_outstanding = sales.copy()
-            sales_outstanding["Amount"] = utils.to_numeric_series(
-                sales_outstanding.get("Amount", pd.Series(dtype=float))
+            sales_outstanding["Total_Amount"] = utils.to_numeric_series(
+                sales_outstanding.get("Total_Amount", pd.Series(dtype=float))
             ).fillna(0.0)
             sales_outstanding["Amount_Received"] = utils.to_numeric_series(
                 sales_outstanding.get("Amount_Received", pd.Series(dtype=float))
             ).fillna(0.0)
-            sales_outstanding["Outstanding"] = (
-                sales_outstanding["Amount"] - sales_outstanding["Amount_Received"]
-            )
+            if "Dues" in sales_outstanding.columns:
+                sales_outstanding["Outstanding"] = utils.to_numeric_series(
+                    sales_outstanding.get("Dues", pd.Series(dtype=float))
+                ).fillna(0.0)
+            elif "Due" in sales_outstanding.columns:
+                sales_outstanding["Outstanding"] = utils.to_numeric_series(
+                    sales_outstanding.get("Due", pd.Series(dtype=float))
+                ).fillna(0.0)
+            else:
+                sales_outstanding["Outstanding"] = (
+                    sales_outstanding["Total_Amount"]
+                    - sales_outstanding["Amount_Received"]
+                )
             outstanding_by_customer = (
                 sales_outstanding.groupby("Customer_ID", dropna=False)["Outstanding"]
                 .sum()
@@ -2019,7 +2033,11 @@ def render() -> None:
             if frame.empty:
                 st.write("No rows.")
                 return
-            date_series = pd.to_datetime(frame.get(date_col, pd.Series(dtype=str)), errors="coerce", dayfirst=True)
+            month_hint = frame["Month"] if "Month" in frame.columns else None
+            date_series = utils.parse_date_series(
+                frame.get(date_col, pd.Series(dtype=str)),
+                month_hint=month_hint,
+            )
             raw_dates = frame.get(date_col, pd.Series(dtype=str)).astype(str).str.strip()
             invalid_date = date_series.isna() & (raw_dates != "")
             st.write(
@@ -2072,7 +2090,16 @@ def render() -> None:
             "Sales Log",
             sales,
             "Date",
-            ["Amount", "Amount_Received", "No_of_Bricks"],
+            [
+                "Amount",
+                "Amount_Received",
+                "Total_Amount",
+                "No_of_Bricks",
+                "GST",
+                "Gst (%12)",
+                "Due",
+                "Dues",
+            ],
         )
         _quality_block(
             "Raw Material Log",
