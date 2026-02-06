@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 
 import pandas as pd
 import streamlit as st
@@ -102,6 +103,70 @@ def _reconcile_payments(
         sales_df.get("Amount_Received", pd.Series(dtype=float))
     ).fillna(0.0)
     sales_df["Dues"] = sales_df["Total_Amount"] - sales_df["Amount_Received"]
+
+    def _invoice_suffix_from_sales_id(value: object) -> str | None:
+        digits = re.sub(r"\D", "", str(value or ""))
+        if not digits:
+            return None
+        if len(digits) >= 4:
+            return digits[-4:]
+        return digits.zfill(4)
+
+    def _ensure_invoice_numbers(frame: pd.DataFrame) -> pd.DataFrame:
+        frame = frame.copy()
+        if frame.empty or "Invoice_No" not in frame.columns:
+            return frame
+        existing_invoices = {
+            str(value).strip()
+            for value in frame.get("Invoice_No", pd.Series(dtype=str)).tolist()
+            if str(value).strip()
+        }
+        pattern = re.compile(r"^INV-(\d{8})-(\d{4})$")
+        max_suffix_by_date: dict[str, int] = {}
+        for invoice in existing_invoices:
+            match = pattern.match(invoice)
+            if not match:
+                continue
+            date_part, suffix = match.groups()
+            max_suffix_by_date[date_part] = max(max_suffix_by_date.get(date_part, 0), int(suffix))
+
+        month_hint = frame["Month"] if "Month" in frame.columns else None
+        date_series = utils.parse_date_series(frame.get("Date", pd.Series(dtype=str)), month_hint=month_hint)
+        sort_key = pd.DataFrame(
+            {
+                "_sort_date": date_series,
+                "_sort_id": frame.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+            },
+            index=frame.index,
+        )
+        seq_by_date = {date_part: value + 1 for date_part, value in max_suffix_by_date.items()}
+        for idx in sort_key.sort_values(["_sort_date", "_sort_id"], na_position="last").index:
+            current = str(frame.at[idx, "Invoice_No"]).strip()
+            if current:
+                continue
+            date_val = date_series.loc[idx]
+            if pd.isna(date_val):
+                continue
+            date_part = pd.Timestamp(date_val).strftime("%d%m%Y")
+            preferred = _invoice_suffix_from_sales_id(frame.at[idx, "Sales_ID"])
+            if preferred:
+                candidate = f"INV-{date_part}-{preferred}"
+                if candidate not in existing_invoices:
+                    frame.at[idx, "Invoice_No"] = candidate
+                    existing_invoices.add(candidate)
+                    continue
+            seq = seq_by_date.get(date_part, 1)
+            while True:
+                candidate = f"INV-{date_part}-{seq:04d}"
+                if candidate not in existing_invoices:
+                    frame.at[idx, "Invoice_No"] = candidate
+                    existing_invoices.add(candidate)
+                    seq_by_date[date_part] = seq + 1
+                    break
+                seq += 1
+        return frame
+
+    sales_df = _ensure_invoice_numbers(sales_df)
 
     payments_df["Payment_Status"] = payments_df.get(
         "Payment_Status", pd.Series(dtype=str)
