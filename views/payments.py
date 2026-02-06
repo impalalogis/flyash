@@ -17,6 +17,7 @@ PAYMENT_COLUMNS = [
     "Date",
     "Mode",
     "Payment_Status",
+    "Remaining_Amount",
 ]
 
 
@@ -29,6 +30,160 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
             label = f"{customer_id} - {name}" if name else customer_id
             options[label] = customer_id
     return options
+
+
+def _format_date_value(value: object) -> str:
+    if isinstance(value, date):
+        return value.isoformat()
+    parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
+    if pd.isna(parsed):
+        return str(value)
+    return parsed.date().isoformat()
+
+
+def _sort_by_date(
+    data_frame: pd.DataFrame,
+    date_col: str,
+    *,
+    secondary_col: str | None = None,
+    month_hint: pd.Series | None = None,
+) -> pd.DataFrame:
+    if data_frame.empty or date_col not in data_frame.columns:
+        return data_frame
+    sort_date = utils.parse_date_series(data_frame[date_col], month_hint=month_hint)
+    sorted_frame = data_frame.assign(_sort_date=sort_date)
+    sort_cols = ["_sort_date"]
+    if secondary_col and secondary_col in sorted_frame.columns:
+        sort_cols.append(secondary_col)
+    sorted_frame = sorted_frame.sort_values(sort_cols, na_position="last")
+    return sorted_frame.drop(columns=["_sort_date"])
+
+
+def _reconcile_payments(
+    payments_df: pd.DataFrame,
+    sales_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    payments_df = utils.ensure_columns(payments_df, PAYMENT_COLUMNS).copy()
+    sales_df = utils.ensure_columns(
+        sales_df,
+        [
+            "Sales_ID",
+            "Customer_ID",
+            "Date",
+            "Month",
+            "Total_Amount",
+            "Amount_Received",
+            "Dues",
+            "Due",
+            "Payment_Mode",
+            "Payment_Date",
+            "Payment_ID",
+        ],
+    ).copy()
+
+    payments_df["Amount_Paid"] = utils.to_numeric_series(
+        payments_df.get("Amount_Paid", pd.Series(dtype=float))
+    ).fillna(0.0)
+    payments_df["Remaining_Amount"] = utils.to_numeric_series(
+        payments_df.get("Remaining_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Total_Amount"] = utils.to_numeric_series(
+        sales_df.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Amount_Received"] = utils.to_numeric_series(
+        sales_df.get("Amount_Received", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Dues"] = sales_df["Total_Amount"] - sales_df["Amount_Received"]
+
+    payments_df["Payment_Status"] = payments_df.get(
+        "Payment_Status", pd.Series(dtype=str)
+    ).astype(str)
+    pending_mask = payments_df["Payment_Status"].str.strip().str.lower().isin(
+        ["pending", ""]
+    )
+    pending_payments = payments_df[pending_mask & (payments_df["Amount_Paid"] > 0)].copy()
+
+    sales_dates = utils.parse_date_series(
+        sales_df.get("Date", pd.Series(dtype=str)),
+        month_hint=sales_df["Month"] if "Month" in sales_df.columns else None,
+    )
+    payments_dates = utils.parse_date_series(
+        payments_df.get("Date", pd.Series(dtype=str))
+    )
+    sales_df = sales_df.assign(_sort_date=sales_dates)
+    payments_df = payments_df.assign(_sort_date=payments_dates)
+    pending_payments = pending_payments.assign(
+        _sort_date=payments_df.loc[pending_payments.index, "_sort_date"]
+    )
+
+    customers = pending_payments["Customer_ID"].astype(str).str.strip().unique().tolist()
+    for customer_id in customers:
+        if not customer_id:
+            continue
+        sales_mask = (sales_df["Customer_ID"].astype(str).str.strip() == customer_id) & (
+            sales_df["Dues"] > 0
+        )
+        sales_indices = (
+            sales_df.loc[sales_mask]
+            .sort_values(["_sort_date", "Sales_ID"], na_position="last")
+            .index.tolist()
+        )
+        payment_mask = pending_payments["Customer_ID"].astype(str).str.strip() == customer_id
+        payment_indices = (
+            pending_payments.loc[payment_mask]
+            .sort_values(["_sort_date", "Payment_ID"], na_position="last")
+            .index.tolist()
+        )
+
+        for payment_idx in payment_indices:
+            remaining = float(payments_df.at[payment_idx, "Amount_Paid"])
+            payment_mode = str(payments_df.at[payment_idx, "Mode"])
+            payment_date_value = _format_date_value(payments_df.at[payment_idx, "Date"])
+            payment_id_value = str(payments_df.at[payment_idx, "Payment_ID"]).strip()
+
+            for sale_idx in sales_indices:
+                if remaining <= 0:
+                    break
+                dues = float(sales_df.at[sale_idx, "Dues"])
+                if dues <= 0:
+                    continue
+                if remaining >= dues:
+                    remaining -= dues
+                    sales_df.at[sale_idx, "Amount_Received"] += dues
+                    sales_df.at[sale_idx, "Dues"] = 0.0
+                else:
+                    sales_df.at[sale_idx, "Amount_Received"] += remaining
+                    sales_df.at[sale_idx, "Dues"] = dues - remaining
+                    remaining = 0.0
+                sales_df.at[sale_idx, "Payment_Mode"] = payment_mode
+                sales_df.at[sale_idx, "Payment_Date"] = payment_date_value
+                sales_df.at[sale_idx, "Payment_ID"] = payment_id_value
+                if remaining <= 0:
+                    break
+
+            if remaining <= 0:
+                payments_df.at[payment_idx, "Payment_Status"] = "Settled"
+                payments_df.at[payment_idx, "Remaining_Amount"] = 0.0
+            else:
+                payments_df.at[payment_idx, "Payment_Status"] = "Partially Settled"
+                payments_df.at[payment_idx, "Remaining_Amount"] = remaining
+
+    sales_df["Dues"] = sales_df["Total_Amount"] - sales_df["Amount_Received"]
+    if "Due" in sales_df.columns:
+        sales_df["Due"] = sales_df["Dues"]
+
+    sales_df = _sort_by_date(
+        sales_df.drop(columns=["_sort_date"]),
+        "Date",
+        secondary_col="Sales_ID",
+        month_hint=sales_df["Month"] if "Month" in sales_df.columns else None,
+    )
+    payments_df = _sort_by_date(
+        payments_df.drop(columns=["_sort_date"]),
+        "Date",
+        secondary_col="Payment_ID",
+    )
+    return payments_df, sales_df
 
 
 def _merge_payment_mode(existing: object, incoming: object) -> str:
@@ -176,7 +331,7 @@ def render() -> None:
                 ["Cash", "UPI", "Bank Transfer", "Cheque", "Other"],
                 index=0,
             )
-            payment_status = st.selectbox("Payment Status", ["Received", "Pending"])
+            st.text_input("Payment Status", value="Pending", disabled=True)
 
         submitted = st.form_submit_button("Save Payment")
 
@@ -203,10 +358,27 @@ def render() -> None:
                 "Amount_Paid": amount_paid,
                 "Date": payment_date.isoformat(),
                 "Mode": mode,
-                "Payment_Status": payment_status,
+                "Payment_Status": "Pending",
+                "Remaining_Amount": 0.0,
             }
             data = {key: data.get(key, "") for key in PAYMENT_COLUMNS}
             database.insert_row("Payments", data)
+
+            payments_sorted = _sort_by_date(
+                database.read_table("Payments"),
+                "Date",
+                secondary_col="Payment_ID",
+            )
+            database.replace_table("Payments", payments_sorted, recompute_stock=False)
+
+            payments_after = database.read_table("Payments")
+            sales_after = database.read_table("Sales_Log")
+            reconciled_payments, reconciled_sales = _reconcile_payments(
+                payments_after,
+                sales_after,
+            )
+            database.replace_table("Payments", reconciled_payments, recompute_stock=False)
+            database.replace_table("Sales_Log", reconciled_sales, recompute_stock=False)
 
             outstanding = 0.0
             customer_row = customers.loc[customers["Customer_ID"] == customer_id]
@@ -237,8 +409,21 @@ def render() -> None:
         customer_id = customer_labels[payment_customer]
         payments_df = payments_df[payments_df["Customer_ID"] == customer_id]
 
-    payments_df = utils.coerce_numeric_columns(payments_df, ["Amount_Paid"])
+    payments_df = utils.coerce_numeric_columns(payments_df, ["Amount_Paid", "Remaining_Amount"])
     st.dataframe(payments_df, width="stretch")
+
+    st.subheader("Reconcile Pending Payments")
+    if st.button("Run reconciliation", key="payments_reconcile"):
+        payments_current = database.read_table("Payments")
+        sales_current = database.read_table("Sales_Log")
+        reconciled_payments, reconciled_sales = _reconcile_payments(
+            payments_current,
+            sales_current,
+        )
+        database.replace_table("Payments", reconciled_payments, recompute_stock=False)
+        database.replace_table("Sales_Log", reconciled_sales, recompute_stock=False)
+        st.success("Payments reconciled with sales log.")
+        st.rerun()
 
     st.subheader("Payment Records")
     entries = database.read_table("Payments")
@@ -249,7 +434,7 @@ def render() -> None:
         st.error("Missing Payment_ID column in Payments.")
         return
 
-    numeric_columns = ["Amount_Paid"]
+    numeric_columns = ["Amount_Paid", "Remaining_Amount"]
     entries = utils.coerce_numeric_columns(entries, numeric_columns)
 
     display_entries = entries.copy()

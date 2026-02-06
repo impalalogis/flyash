@@ -34,6 +34,7 @@ SALES_COLUMNS = [
     "Amount_Received",
     "Payment_Mode",
     "Payment_Date",
+    "Payment_ID",
     "Due",
     "Dues",
     "Invoice_No",
@@ -104,6 +105,46 @@ def _parse_date(value: object) -> date | None:
     if pd.isna(parsed):
         return None
     return parsed.date()
+
+
+def _invoice_suffix(sales_id: str) -> str | None:
+    digits = re.sub(r"\D", "", sales_id)
+    if len(digits) >= 4:
+        return digits[-4:]
+    return None
+
+
+def _generate_invoice_no(
+    sale_date: date,
+    sales_id: str,
+    existing_invoices: list[str],
+) -> str:
+    date_part = sale_date.strftime("%d%m%Y")
+    suffix = _invoice_suffix(sales_id)
+    existing = {str(value).strip() for value in existing_invoices if value}
+    if not suffix:
+        suffix = f"{pd.Timestamp.utcnow().microsecond % 10000:04d}"
+    invoice = f"INV-{date_part}-{suffix}"
+    if invoice not in existing:
+        return invoice
+    for _ in range(20):
+        suffix = f"{pd.Timestamp.utcnow().microsecond % 10000:04d}"
+        invoice = f"INV-{date_part}-{suffix}"
+        if invoice not in existing:
+            return invoice
+    return invoice
+
+
+def _sort_sales_log() -> None:
+    sales_df = database.read_table("Sales_Log")
+    if sales_df.empty or "Date" not in sales_df.columns:
+        return
+    month_hint = sales_df["Month"] if "Month" in sales_df.columns else None
+    sorted_df = sales_df.assign(
+        _sort_date=utils.parse_date_series(sales_df["Date"], month_hint=month_hint)
+    ).sort_values(["_sort_date", "Sales_ID"], na_position="last")
+    sorted_df = sorted_df.drop(columns=["_sort_date"])
+    database.replace_table("Sales_Log", sorted_df, recompute_stock=False)
 
 
 def _resolve_invoice_settings(
@@ -218,7 +259,7 @@ def render() -> None:
             )
         with col3:
             payment_date = st.date_input("Payment Date", value=sale_date)
-            invoice_no = st.text_input("Invoice No")
+            invoice_no = st.text_input("Invoice No (optional)")
 
         amount = utils.calculate_sales_amount(no_of_bricks, rate)
         gst_amount = (amount * gst_rate / 100) if gst_rate else 0.0
@@ -241,8 +282,6 @@ def render() -> None:
             errors.append("Rate must be greater than 0.")
         if amount_received > total_amount:
             errors.append("Amount Received cannot exceed Total Amount.")
-        if not invoice_no:
-            errors.append("Invoice No is required.")
 
         if errors:
             for error in errors:
@@ -258,6 +297,16 @@ def render() -> None:
             sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
             fiscal_label = _fy_label_short(sale_date)
             due_amount = total_amount - amount_received
+            existing_invoices = (
+                entries.get("Invoice_No", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
+            invoice_no_final = (
+                str(invoice_no).strip()
+                or _generate_invoice_no(sale_date, sales_id, existing_invoices)
+            )
             data = {
                 "Sales_ID": sales_id,
                 "Date": sale_date.isoformat(),
@@ -280,16 +329,14 @@ def render() -> None:
                 "Amount_Received": amount_received,
                 "Payment_Mode": payment_mode,
                 "Payment_Date": payment_date.isoformat(),
-                "Due": utils.sales_due_for_column(
-                    entries, total_amount, amount_received, column="Due"
-                ),
-                "Dues": utils.sales_due_for_column(
-                    entries, total_amount, amount_received, column="Dues"
-                ),
-                "Invoice_No": invoice_no,
+                "Payment_ID": "",
+                "Due": total_amount - amount_received,
+                "Dues": total_amount - amount_received,
+                "Invoice_No": invoice_no_final,
             }
             data = {key: data.get(key, "") for key in SALES_COLUMNS}
             database.insert_row("Sales_Log", data)
+            _sort_sales_log()
 
             outstanding = 0.0
             customer_row = customers.loc[customers["Customer_ID"] == customer_id]
@@ -855,7 +902,6 @@ def render() -> None:
         rules = {
             "Date": {"required": True},
             "Customer_ID": {"required": True},
-            "Invoice_No": {"required": True},
             "No_of_Bricks": {"numeric": True, "min": 0},
             "Rate": {"numeric": True, "min": 0},
             "GST": {"numeric": True, "min": 0},
@@ -893,9 +939,8 @@ def render() -> None:
             if due_col not in entries.columns:
                 continue
             due_series = pd.to_numeric(entries.get(due_col, pd.Series(dtype=float)), errors="coerce")
-            sign = utils.sales_due_sign(entries, due_col)
             mask = utils.apply_invalid_mask(
-                mask, due_col, (due_series - calc_due * sign).abs() > 0.01
+                mask, due_col, (due_series - calc_due).abs() > 0.01
             )
 
         if mask.any().any():
@@ -943,12 +988,8 @@ def render() -> None:
                     data = row.to_dict()
                     data["Amount"] = amount_new
                     data["Total_Amount"] = total_new
-                    data["Due"] = utils.sales_due_for_column(
-                        entries, total_new, received_new, column="Due"
-                    )
-                    data["Dues"] = utils.sales_due_for_column(
-                        entries, total_new, received_new, column="Dues"
-                    )
+                    data["Due"] = total_new - received_new
+                    data["Dues"] = total_new - received_new
                     entry_date = _parse_date(row.get("Date", ""))
                     if entry_date:
                         fiscal_label = _fy_label_short(entry_date)
@@ -956,6 +997,19 @@ def render() -> None:
                         data["Month"] = utils.to_month_string(entry_date)
                         data["Fiscal"] = fiscal_label
                         data["Fiscal Year"] = fiscal_label
+                    invoice_current = str(row.get("Invoice_No", "")).strip()
+                    if not invoice_current:
+                        existing_invoices = (
+                            entries.get("Invoice_No", pd.Series(dtype=str))
+                            .astype(str)
+                            .str.strip()
+                            .tolist()
+                        )
+                        data["Invoice_No"] = _generate_invoice_no(
+                            entry_date or date.today(),
+                            row_id,
+                            existing_invoices,
+                        )
 
                     database.update_row("Sales_Log", row_id, data)
 
@@ -990,6 +1044,7 @@ def render() -> None:
                                 {"Outstanding_Balance": outstanding_map[new_customer]},
                             )
 
+                _sort_sales_log()
                 st.success("Corrections saved.")
                 st.rerun()
         else:
