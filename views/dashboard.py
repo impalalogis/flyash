@@ -382,11 +382,14 @@ def render() -> None:
         [
             "No_of_Bricks",
             "Rate",
+            "GST",
+            "Gst (%12)",
             "Amount",
             "Freight",
             "Total_Amount",
             "Amount_Received",
             "Due",
+            "Dues",
         ],
     )
     stock_log = _parse_dates(database.read_table("Stock_Log"), "Date")
@@ -2077,7 +2080,16 @@ def render() -> None:
             "Sales Log",
             sales,
             "Date",
-            ["Amount", "Amount_Received", "No_of_Bricks"],
+            [
+                "Amount",
+                "Amount_Received",
+                "Total_Amount",
+                "No_of_Bricks",
+                "GST",
+                "Gst (%12)",
+                "Due",
+                "Dues",
+            ],
         )
         _quality_block(
             "Raw Material Log",

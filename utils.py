@@ -124,6 +124,40 @@ def parse_date_series(
     return parsed.fillna(parsed_monthfirst)
 
 
+def sales_expected_due_series(data_frame: pd.DataFrame) -> pd.Series:
+    total = to_numeric_series(
+        data_frame.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    received = to_numeric_series(
+        data_frame.get("Amount_Received", pd.Series(dtype=float))
+    ).fillna(0.0)
+    return total - received
+
+
+def sales_due_sign(data_frame: pd.DataFrame, column: str) -> int:
+    if data_frame.empty or column not in data_frame.columns:
+        return -1 if column.strip().lower() == "dues" else 1
+    expected = sales_expected_due_series(data_frame)
+    due = to_numeric_series(data_frame.get(column, pd.Series(dtype=float)))
+    valid = due.notna()
+    if not valid.any():
+        return -1 if column.strip().lower() == "dues" else 1
+    diff_expected = (due[valid] - expected[valid]).abs().mean()
+    diff_inverted = (due[valid] + expected[valid]).abs().mean()
+    return -1 if diff_inverted < diff_expected else 1
+
+
+def sales_due_for_column(
+    data_frame: pd.DataFrame,
+    total_amount: float,
+    amount_received: float,
+    *,
+    column: str,
+) -> float:
+    sign = sales_due_sign(data_frame, column) if column in data_frame.columns else 1
+    return (total_amount - amount_received) * sign
+
+
 def payment_week_range(entry_date: date, weeks: int) -> tuple[date, date, str]:
     weeks = max(1, int(weeks))
     week_start = entry_date - timedelta(days=entry_date.weekday())

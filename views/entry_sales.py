@@ -15,11 +15,16 @@ import utils
 SALES_COLUMNS = [
     "Sales_ID",
     "Date",
+    "Fiscal",
+    "Fiscal Year",
+    "Year",
     "Month",
     "Customer_ID",
     "Destination",
     "No_of_Bricks",
     "Rate",
+    "GST",
+    "Gst (%12)",
     "Amount",
     "Freight",
     "Transport_Party",
@@ -30,6 +35,7 @@ SALES_COLUMNS = [
     "Payment_Mode",
     "Payment_Date",
     "Due",
+    "Dues",
     "Invoice_No",
 ]
 
@@ -74,6 +80,30 @@ def _invoice_defaults() -> tuple[dict[str, str], dict[str, object], dict[str, st
         "qr_data": str(invoice_secrets.get("qr_data", "")).strip(),
     }
     return company_defaults, branding_defaults, payment_defaults
+
+
+def _fy_label_short(value: date) -> str:
+    start_year = value.year if value.month >= 4 else value.year - 1
+    return f"FY{str(start_year)[-2:]}-{str(start_year + 1)[-2:]}"
+
+
+def _sales_due_label(entries: pd.DataFrame) -> str:
+    if "Dues" in entries.columns:
+        return "Dues"
+    if "Due" in entries.columns:
+        return "Due"
+    return "Due"
+
+
+def _parse_date(value: object) -> date | None:
+    if isinstance(value, date):
+        return value
+    if value in ("", None):
+        return None
+    parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
 
 
 def _resolve_invoice_settings(
@@ -149,6 +179,9 @@ def render() -> None:
         st.info("Customer IDs are missing. Update Master Data.")
         return
 
+    entries = database.read_table("Sales_Log")
+    due_label = _sales_due_label(entries)
+
     company_defaults, branding_defaults, payment_defaults = _invoice_defaults()
     has_company_defaults = any(company_defaults.values())
     has_branding_defaults = any(
@@ -172,6 +205,7 @@ def render() -> None:
             no_of_bricks = st.number_input("No of Bricks", min_value=0, step=1)
             rate = st.number_input("Rate", min_value=0.0, step=1.0)
         with col2:
+            gst_rate = st.number_input("GST (%)", min_value=0.0, step=1.0, value=12.0)
             freight = st.number_input("Freight", min_value=0.0, step=1.0)
             transport_party = st.text_input("Transport Party")
             freight_paid = st.selectbox("Freight Paid", ["No", "Yes"], index=0)
@@ -187,13 +221,15 @@ def render() -> None:
             invoice_no = st.text_input("Invoice No")
 
         amount = utils.calculate_sales_amount(no_of_bricks, rate)
+        gst_amount = (amount * gst_rate / 100) if gst_rate else 0.0
         total_amount = utils.calculate_total_amount(amount, freight)
-        due = utils.calculate_due(total_amount, amount_received)
+        due_display = total_amount - amount_received
 
         st.markdown("**Calculated Totals**")
         st.write(f"Amount: {amount:,.2f}")
+        st.write(f"GST Amount: {gst_amount:,.2f}")
         st.write(f"Total Amount: {total_amount:,.2f}")
-        st.write(f"Due: {due:,.2f}")
+        st.write(f"{due_label} (calc): {due_display:,.2f}")
 
         submitted = st.form_submit_button("Save Entry")
 
@@ -220,14 +256,21 @@ def render() -> None:
                 .tolist()
             )
             sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
+            fiscal_label = _fy_label_short(sale_date)
+            due_amount = total_amount - amount_received
             data = {
                 "Sales_ID": sales_id,
                 "Date": sale_date.isoformat(),
+                "Fiscal": fiscal_label,
+                "Fiscal Year": fiscal_label,
+                "Year": sale_date.strftime("%Y"),
                 "Month": utils.to_month_string(sale_date),
                 "Customer_ID": customer_id,
                 "Destination": destination,
                 "No_of_Bricks": no_of_bricks,
                 "Rate": rate,
+                "GST": gst_amount,
+                "Gst (%12)": gst_amount,
                 "Amount": amount,
                 "Freight": freight,
                 "Transport_Party": transport_party,
@@ -237,7 +280,12 @@ def render() -> None:
                 "Amount_Received": amount_received,
                 "Payment_Mode": payment_mode,
                 "Payment_Date": payment_date.isoformat(),
-                "Due": due,
+                "Due": utils.sales_due_for_column(
+                    entries, total_amount, amount_received, column="Due"
+                ),
+                "Dues": utils.sales_due_for_column(
+                    entries, total_amount, amount_received, column="Dues"
+                ),
                 "Invoice_No": invoice_no,
             }
             data = {key: data.get(key, "") for key in SALES_COLUMNS}
@@ -253,7 +301,7 @@ def render() -> None:
             database.update_row(
                 "Customers",
                 customer_id,
-                {"Outstanding_Balance": outstanding + due},
+                {"Outstanding_Balance": outstanding + due_amount},
             )
             st.success("Sales entry saved and outstanding updated.")
 
@@ -268,11 +316,14 @@ def render() -> None:
         numeric_columns = [
             "No_of_Bricks",
             "Rate",
+            "GST",
+            "Gst (%12)",
             "Amount",
             "Freight",
             "Total_Amount",
             "Amount_Received",
             "Due",
+            "Dues",
         ]
         entries = utils.coerce_numeric_columns(entries, numeric_columns)
 
@@ -315,7 +366,9 @@ def render() -> None:
                             continue
                         row = row.iloc[0]
                         customer_id = str(row.get("Customer_ID", "")).strip()
-                        due = utils.safe_float(row.get("Due", 0))
+                        total_amount = utils.safe_float(row.get("Total_Amount", 0))
+                        received_amount = utils.safe_float(row.get("Amount_Received", 0))
+                        due = total_amount - received_amount
                         if customer_id:
                             outstanding_map[customer_id] = (
                                 outstanding_map.get(customer_id, 0.0) - due
@@ -605,6 +658,7 @@ def render() -> None:
                 "Total_Amount",
                 "Amount_Received",
                 "Due",
+                "Dues",
                 "Payment_Mode",
                 "Payment_Date",
                 "Invoice_No",
@@ -627,10 +681,12 @@ def render() -> None:
             "Total_Amount",
             "Amount_Received",
             "Due",
+            "Dues",
         ]:
             ledger_source[column] = utils.to_numeric_series(
                 ledger_source.get(column, pd.Series(dtype=float))
             ).fillna(0.0)
+        ledger_source["Due"] = utils.sales_expected_due_series(ledger_source)
 
         ledger_customer_label = st.selectbox(
             "Customer",
@@ -802,12 +858,17 @@ def render() -> None:
             "Invoice_No": {"required": True},
             "No_of_Bricks": {"numeric": True, "min": 0},
             "Rate": {"numeric": True, "min": 0},
+            "GST": {"numeric": True, "min": 0},
+            "Gst (%12)": {"numeric": True, "min": 0},
             "Amount": {"numeric": True, "min": 0},
             "Freight": {"numeric": True, "min": 0},
             "Total_Amount": {"numeric": True, "min": 0},
             "Amount_Received": {"numeric": True, "min": 0},
-            "Due": {"numeric": True},
         }
+        if "Due" in entries.columns:
+            rules["Due"] = {"numeric": True}
+        if "Dues" in entries.columns:
+            rules["Dues"] = {"numeric": True}
         mask, errors = utils.build_validation_mask(entries, rules)
         bricks = pd.to_numeric(entries.get("No_of_Bricks", pd.Series(dtype=float)), errors="coerce")
         rate_val = pd.to_numeric(entries.get("Rate", pd.Series(dtype=float)), errors="coerce")
@@ -821,7 +882,6 @@ def render() -> None:
             entries.get("Amount_Received", pd.Series(dtype=float)),
             errors="coerce",
         )
-        due = pd.to_numeric(entries.get("Due", pd.Series(dtype=float)), errors="coerce")
         calc_amount = bricks * rate_val
         calc_total = calc_amount + freight
         calc_due = calc_total - received
@@ -829,7 +889,14 @@ def render() -> None:
         mask = utils.apply_invalid_mask(
             mask, "Total_Amount", (total_amount - calc_total).abs() > 0.01
         )
-        mask = utils.apply_invalid_mask(mask, "Due", (due - calc_due).abs() > 0.01)
+        for due_col in ["Due", "Dues"]:
+            if due_col not in entries.columns:
+                continue
+            due_series = pd.to_numeric(entries.get(due_col, pd.Series(dtype=float)), errors="coerce")
+            sign = utils.sales_due_sign(entries, due_col)
+            mask = utils.apply_invalid_mask(
+                mask, due_col, (due_series - calc_due * sign).abs() > 0.01
+            )
 
         if mask.any().any():
             st.caption("Rows highlighted in red need correction. Calculated fields will be refreshed.")
@@ -860,7 +927,9 @@ def render() -> None:
                         continue
                     original = original.iloc[0]
                     old_customer = str(original.get("Customer_ID", "")).strip()
-                    old_due = utils.safe_float(original.get("Due", 0))
+                    old_total = utils.safe_float(original.get("Total_Amount", 0))
+                    old_received = utils.safe_float(original.get("Amount_Received", 0))
+                    old_due = old_total - old_received
 
                     new_customer = str(row.get("Customer_ID", "")).strip()
                     bricks_val = utils.safe_float(row.get("No_of_Bricks", 0))
@@ -874,7 +943,19 @@ def render() -> None:
                     data = row.to_dict()
                     data["Amount"] = amount_new
                     data["Total_Amount"] = total_new
-                    data["Due"] = due_new
+                    data["Due"] = utils.sales_due_for_column(
+                        entries, total_new, received_new, column="Due"
+                    )
+                    data["Dues"] = utils.sales_due_for_column(
+                        entries, total_new, received_new, column="Dues"
+                    )
+                    entry_date = _parse_date(row.get("Date", ""))
+                    if entry_date:
+                        fiscal_label = _fy_label_short(entry_date)
+                        data["Year"] = entry_date.strftime("%Y")
+                        data["Month"] = utils.to_month_string(entry_date)
+                        data["Fiscal"] = fiscal_label
+                        data["Fiscal Year"] = fiscal_label
 
                     database.update_row("Sales_Log", row_id, data)
 

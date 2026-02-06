@@ -120,11 +120,14 @@ Notes:
 **Sales_Log**
 - Sales_ID
 - Date
+- Fiscal
+- Year
 - Month
 - Customer_ID
 - Destination
 - No_of_Bricks
 - Rate
+- Gst (%12)
 - Amount
 - Freight
 - Transport_Party
@@ -134,8 +137,13 @@ Notes:
 - Amount_Received
 - Payment_Mode
 - Payment_Date
-- Due
+- Dues
 - Invoice_No
+
+Notes:
+- Fiscal stores FY labels like "FY23-24".
+- If your sheet uses `Due` instead of `Dues`, the app handles both.
+- `Gst (%12)` stores the GST amount (12% by default).
 
 **Payments**
 - Payment_ID
