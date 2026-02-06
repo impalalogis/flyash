@@ -146,7 +146,6 @@ def _sort_sales_log() -> None:
 
 def _payment_applied_amount(row: pd.Series) -> float:
     amount_paid = utils.safe_float(row.get("Amount_Paid", 0.0))
-    remaining = utils.safe_float(row.get("Remaining_Amount", 0.0))
     status = str(row.get("Payment_Status", "")).strip().lower()
     if status == "pending":
         return 0.0
@@ -193,6 +192,7 @@ def _build_customer_ledger(
             "Month",
             "Customer_ID",
             "Destination",
+            "No_of_Bricks",
             "Amount",
             "Freight",
             "GST",
@@ -224,6 +224,8 @@ def _build_customer_ledger(
                 "Type",
                 "Reference",
                 "Description",
+                "Qty",
+                "GST",
                 "Debit",
                 "Credit",
                 "Running_Balance",
@@ -260,6 +262,12 @@ def _build_customer_ledger(
                 sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
             ),
             "Description": sales_df.apply(_sale_description, axis=1),
+            "Qty": utils.to_numeric_series(
+                sales_df.get("No_of_Bricks", pd.Series(dtype=float))
+            ).fillna(0.0),
+            "GST": utils.to_numeric_series(
+                sales_df.get("GST", pd.Series(dtype=float))
+            ).fillna(0.0),
             "Debit": sales_df["Total_Amount"],
             "Credit": 0.0,
             "_applied": 0.0,
@@ -274,6 +282,8 @@ def _build_customer_ledger(
             "Type": "Payment",
             "Reference": payment_refs,
             "Description": payments_df.apply(_payment_description, axis=1),
+            "Qty": 0.0,
+            "GST": 0.0,
             "Debit": 0.0,
             "Credit": payments_df["Amount_Paid"],
             "_applied": applied_amounts,
@@ -298,23 +308,6 @@ def _build_customer_ledger(
         balances.append(running_balance)
     ledger_df["Running_Balance"] = balances
     return ledger_df.drop(columns=["_sort_date", "_type_order", "_applied"])
-
-
-def _payment_applied_amount(row: pd.Series) -> float:
-    amount_paid = utils.safe_float(row.get("Amount_Paid", 0.0))
-    status = str(row.get("Payment_Status", "")).strip().lower()
-    remaining_raw = row.get("Remaining_Amount", "")
-    remaining_known = str(remaining_raw).strip() != ""
-    remaining = utils.safe_float(remaining_raw, default=0.0) if remaining_known else None
-    if status == "settled":
-        return amount_paid
-    if status == "partially settled" and remaining is not None:
-        return max(amount_paid - remaining, 0.0)
-    if status == "pending":
-        return 0.0
-    if remaining is not None:
-        return max(amount_paid - remaining, 0.0)
-    return 0.0
 
 
 def _ledger_events(
@@ -420,6 +413,8 @@ def _ledger_events(
                 "Type",
                 "Reference",
                 "Description",
+                "Qty",
+                "GST",
                 "Debit",
                 "Credit",
                 "Running_Balance",
@@ -1052,6 +1047,8 @@ def render() -> None:
                         "Type",
                         "Reference",
                         "Description",
+                        "Qty",
+                        "GST",
                         "Debit",
                         "Credit",
                         "Running_Balance",
@@ -1093,6 +1090,8 @@ def render() -> None:
                         "Type",
                         "Reference",
                         "Description",
+                        "Qty",
+                        "GST",
                         "Debit",
                         "Credit",
                         "Running_Balance",

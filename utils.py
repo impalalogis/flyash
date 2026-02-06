@@ -896,13 +896,15 @@ def generate_customer_ledger_pdf(
 
     if ledger_mode:
         columns = [
-            ("Date", 18 * mm, "left"),
-            ("Type", 16 * mm, "left"),
-            ("Reference", 28 * mm, "left"),
-            ("Description", 48 * mm, "left"),
-            ("Debit", 18 * mm, "right"),
-            ("Credit", 18 * mm, "right"),
-            ("Balance", 20 * mm, "right"),
+            ("Date", 16 * mm, "left"),
+            ("Type", 14 * mm, "left"),
+            ("Reference", 24 * mm, "left"),
+            ("Description", 38 * mm, "left"),
+            ("Qty", 12 * mm, "right"),
+            ("GST", 14 * mm, "right"),
+            ("Debit", 16 * mm, "right"),
+            ("Credit", 16 * mm, "right"),
+            ("Balance", 18 * mm, "right"),
         ]
     else:
         columns = [
@@ -1000,6 +1002,8 @@ def generate_customer_ledger_pdf(
                     "Type": str(row.get("Type", "")).strip(),
                     "Reference": str(row.get("Reference", "")).strip(),
                     "Description": str(row.get("Description", "")).strip(),
+                    "Qty": f"{safe_float(row.get('Qty', 0)):,.0f}",
+                    "GST": f"{safe_float(row.get('GST', 0)):,.2f}",
                     "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
                     "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
                     "Balance": f"{safe_float(row.get(balance_col, 0)):,.2f}",
