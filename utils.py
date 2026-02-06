@@ -654,24 +654,48 @@ def generate_customer_ledger_pdf(
 
     ledger_df = ledger_df.copy() if ledger_df is not None else pd.DataFrame()
     ledger_df = ledger_df.where(pd.notnull(ledger_df), "")
+    ledger_mode = {"Type", "Debit", "Credit"}.issubset(ledger_df.columns)
 
-    total_amount = float(
-        pd.to_numeric(ledger_df.get("Total_Amount", pd.Series(dtype=float)), errors="coerce")
-        .fillna(0.0)
-        .sum()
-    )
-    total_received = float(
-        pd.to_numeric(
-            ledger_df.get("Amount_Received", pd.Series(dtype=float)), errors="coerce"
+    if ledger_mode:
+        debit_series = pd.to_numeric(
+            ledger_df.get("Debit", pd.Series(dtype=float)), errors="coerce"
+        ).fillna(0.0)
+        credit_series = pd.to_numeric(
+            ledger_df.get("Credit", pd.Series(dtype=float)), errors="coerce"
+        ).fillna(0.0)
+        total_amount = float(debit_series.sum())
+        total_received = float(credit_series.sum())
+        running_col = (
+            "Running_Balance"
+            if "Running_Balance" in ledger_df.columns
+            else "Running Balance"
         )
-        .fillna(0.0)
-        .sum()
-    )
-    total_due = float(
-        pd.to_numeric(ledger_df.get("Due", pd.Series(dtype=float)), errors="coerce")
-        .fillna(0.0)
-        .sum()
-    )
+        running_series = pd.to_numeric(
+            ledger_df.get(running_col, pd.Series(dtype=float)), errors="coerce"
+        ).dropna()
+        total_due = float(running_series.iloc[-1]) if not running_series.empty else 0.0
+    else:
+        total_amount = float(
+            pd.to_numeric(
+                ledger_df.get("Total_Amount", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .sum()
+        )
+        total_received = float(
+            pd.to_numeric(
+                ledger_df.get("Amount_Received", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .sum()
+        )
+        total_due = float(
+            pd.to_numeric(ledger_df.get("Due", pd.Series(dtype=float)), errors="coerce")
+            .fillna(0.0)
+            .sum()
+        )
 
     def _format_date(value: object) -> str:
         if isinstance(value, date):
@@ -791,15 +815,17 @@ def generate_customer_ledger_pdf(
 
         summary_y = height - 60 * mm
         pdf.setFont("Helvetica-Bold", 9)
+        amount_label = "Total Sales" if ledger_mode else "Total Amount"
+        received_label = "Total Payments" if ledger_mode else "Total Received"
         pdf.drawRightString(
             width - 20 * mm,
             summary_y,
-            f"Total Amount: {total_amount:,.2f}",
+            f"{amount_label}: {total_amount:,.2f}",
         )
         pdf.drawRightString(
             width - 20 * mm,
             summary_y - 4 * mm,
-            f"Total Received: {total_received:,.2f}",
+            f"{received_label}: {total_received:,.2f}",
         )
         pdf.drawRightString(
             width - 20 * mm,
@@ -863,16 +889,27 @@ def generate_customer_ledger_pdf(
 
         _draw_qr(qr_data)
 
-    columns = [
-        ("Date", 18 * mm, "left"),
-        ("Invoice", 32 * mm, "left"),
-        ("Bricks", 18 * mm, "right"),
-        ("Amount", 18 * mm, "right"),
-        ("Freight", 16 * mm, "right"),
-        ("Total", 20 * mm, "right"),
-        ("Received", 22 * mm, "right"),
-        ("Due", 18 * mm, "right"),
-    ]
+    if ledger_mode:
+        columns = [
+            ("Date", 18 * mm, "left"),
+            ("Type", 16 * mm, "left"),
+            ("Reference", 28 * mm, "left"),
+            ("Description", 48 * mm, "left"),
+            ("Debit", 18 * mm, "right"),
+            ("Credit", 18 * mm, "right"),
+            ("Balance", 20 * mm, "right"),
+        ]
+    else:
+        columns = [
+            ("Date", 18 * mm, "left"),
+            ("Invoice", 32 * mm, "left"),
+            ("Bricks", 18 * mm, "right"),
+            ("Amount", 18 * mm, "right"),
+            ("Freight", 16 * mm, "right"),
+            ("Total", 20 * mm, "right"),
+            ("Received", 22 * mm, "right"),
+            ("Due", 18 * mm, "right"),
+        ]
     table_width = sum(width for _, width, _ in columns)
     left_x = 15 * mm
     row_height = 6 * mm
@@ -908,16 +945,32 @@ def generate_customer_ledger_pdf(
                 pdf.showPage()
                 y_position = _draw_header()
                 y_position = _draw_table_header(y_position)
-            values = {
-                "Date": _format_date(row.get("Date", "")),
-                "Invoice": str(row.get("Invoice", "")).strip(),
-                "Bricks": f"{safe_float(row.get('No_of_Bricks', 0)):,.0f}",
-                "Amount": f"{safe_float(row.get('Amount', 0)):,.2f}",
-                "Freight": f"{safe_float(row.get('Freight', 0)):,.2f}",
-                "Total": f"{safe_float(row.get('Total_Amount', 0)):,.2f}",
-                "Received": f"{safe_float(row.get('Amount_Received', 0)):,.2f}",
-                "Due": f"{safe_float(row.get('Due', 0)):,.2f}",
-            }
+            if ledger_mode:
+                balance_col = (
+                    "Running_Balance"
+                    if "Running_Balance" in ledger_df.columns
+                    else "Running Balance"
+                )
+                values = {
+                    "Date": _format_date(row.get("Date", "")),
+                    "Type": str(row.get("Type", "")).strip(),
+                    "Reference": str(row.get("Reference", "")).strip(),
+                    "Description": str(row.get("Description", "")).strip(),
+                    "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
+                    "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
+                    "Balance": f"{safe_float(row.get(balance_col, 0)):,.2f}",
+                }
+            else:
+                values = {
+                    "Date": _format_date(row.get("Date", "")),
+                    "Invoice": str(row.get("Invoice", "")).strip(),
+                    "Bricks": f"{safe_float(row.get('No_of_Bricks', 0)):,.0f}",
+                    "Amount": f"{safe_float(row.get('Amount', 0)):,.2f}",
+                    "Freight": f"{safe_float(row.get('Freight', 0)):,.2f}",
+                    "Total": f"{safe_float(row.get('Total_Amount', 0)):,.2f}",
+                    "Received": f"{safe_float(row.get('Amount_Received', 0)):,.2f}",
+                    "Due": f"{safe_float(row.get('Due', 0)):,.2f}",
+                }
             x = left_x + 1 * mm
             for label, width, align in columns:
                 text = values.get(label, "")

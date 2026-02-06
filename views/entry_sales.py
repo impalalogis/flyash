@@ -17,6 +17,7 @@ SALES_COLUMNS = [
     "Date",
     "Fiscal",
     "Fiscal Year",
+    "Fiscal_Year",
     "Year",
     "Month",
     "Customer_ID",
@@ -145,6 +146,305 @@ def _sort_sales_log() -> None:
     ).sort_values(["_sort_date", "Sales_ID"], na_position="last")
     sorted_df = sorted_df.drop(columns=["_sort_date"])
     database.replace_table("Sales_Log", sorted_df, recompute_stock=False)
+
+
+def _payment_applied_amount(row: pd.Series) -> float:
+    amount_paid = utils.safe_float(row.get("Amount_Paid", 0.0))
+    remaining = utils.safe_float(row.get("Remaining_Amount", 0.0))
+    status = str(row.get("Payment_Status", "")).strip().lower()
+    if status == "pending":
+        return 0.0
+    if status == "settled":
+        return amount_paid
+    if status == "partially settled":
+        return max(amount_paid - remaining, 0.0)
+    if remaining > 0:
+        return max(amount_paid - remaining, 0.0)
+    return amount_paid
+
+
+def _sale_description(row: pd.Series) -> str:
+    destination = str(row.get("Destination", "")).strip()
+    if destination:
+        return f"Sale to {destination}"
+    return "Sale invoice"
+
+
+def _payment_description(row: pd.Series) -> str:
+    mode = str(row.get("Mode", "")).strip()
+    invoice_ref = str(row.get("Invoice_No", "")).strip()
+    if invoice_ref and mode:
+        return f"Payment ({mode}) for {invoice_ref}"
+    if mode:
+        return f"Payment ({mode})"
+    if invoice_ref:
+        return f"Payment for {invoice_ref}"
+    return "Payment received"
+
+
+def _build_customer_ledger(
+    sales_df: pd.DataFrame,
+    payments_df: pd.DataFrame,
+    customer_id: str,
+) -> pd.DataFrame:
+    sales_df = utils.ensure_columns(
+        sales_df,
+        [
+            "Sales_ID",
+            "Date",
+            "Month",
+            "Customer_ID",
+            "Destination",
+            "Total_Amount",
+            "Invoice_No",
+        ],
+    ).copy()
+    payments_df = utils.ensure_columns(
+        payments_df,
+        [
+            "Payment_ID",
+            "Customer_ID",
+            "Invoice_No",
+            "Amount_Paid",
+            "Date",
+            "Mode",
+            "Payment_Status",
+            "Remaining_Amount",
+        ],
+    ).copy()
+
+    sales_df = sales_df[sales_df["Customer_ID"].astype(str).str.strip() == customer_id]
+    payments_df = payments_df[payments_df["Customer_ID"].astype(str).str.strip() == customer_id]
+
+    if sales_df.empty and payments_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "Date",
+                "Type",
+                "Reference",
+                "Description",
+                "Debit",
+                "Credit",
+                "Running_Balance",
+            ]
+        )
+
+    sales_df["Total_Amount"] = utils.to_numeric_series(
+        sales_df.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    payments_df["Amount_Paid"] = utils.to_numeric_series(
+        payments_df.get("Amount_Paid", pd.Series(dtype=float))
+    ).fillna(0.0)
+    payments_df["Remaining_Amount"] = utils.to_numeric_series(
+        payments_df.get("Remaining_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+
+    sales_dates = utils.parse_date_series(
+        sales_df.get("Date", pd.Series(dtype=str)),
+        month_hint=sales_df["Month"] if "Month" in sales_df.columns else None,
+    )
+    payment_dates = utils.parse_date_series(
+        payments_df.get("Date", pd.Series(dtype=str)),
+    )
+
+    sales_events = pd.DataFrame(
+        {
+            "Date": sales_dates.dt.date,
+            "Type": "Sale",
+            "Reference": sales_df.get("Invoice_No", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .where(
+                sales_df.get("Invoice_No", pd.Series(dtype=str)).astype(str).str.strip() != "",
+                sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+            ),
+            "Description": sales_df.apply(_sale_description, axis=1),
+            "Debit": sales_df["Total_Amount"],
+            "Credit": 0.0,
+            "_applied": 0.0,
+        }
+    )
+
+    applied_amounts = payments_df.apply(_payment_applied_amount, axis=1)
+    payment_refs = payments_df.get("Payment_ID", pd.Series(dtype=str)).astype(str)
+    payment_events = pd.DataFrame(
+        {
+            "Date": payment_dates.dt.date,
+            "Type": "Payment",
+            "Reference": payment_refs,
+            "Description": payments_df.apply(_payment_description, axis=1),
+            "Debit": 0.0,
+            "Credit": payments_df["Amount_Paid"],
+            "_applied": applied_amounts,
+        }
+    )
+
+    ledger_df = pd.concat([sales_events, payment_events], ignore_index=True)
+    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce")
+    ledger_df["_type_order"] = ledger_df["Type"].map({"Sale": 0, "Payment": 1}).fillna(2)
+    ledger_df = ledger_df.sort_values(
+        ["_sort_date", "_type_order", "Reference"],
+        na_position="last",
+    )
+
+    running_balance = 0.0
+    balances = []
+    for _, row in ledger_df.iterrows():
+        if row["Type"] == "Sale":
+            running_balance += utils.safe_float(row["Debit"], 0.0)
+        else:
+            running_balance -= utils.safe_float(row["_applied"], 0.0)
+        balances.append(running_balance)
+    ledger_df["Running_Balance"] = balances
+    return ledger_df.drop(columns=["_sort_date", "_type_order", "_applied"])
+
+
+def _payment_applied_amount(row: pd.Series) -> float:
+    amount_paid = utils.safe_float(row.get("Amount_Paid", 0.0))
+    status = str(row.get("Payment_Status", "")).strip().lower()
+    remaining_raw = row.get("Remaining_Amount", "")
+    remaining_known = str(remaining_raw).strip() != ""
+    remaining = utils.safe_float(remaining_raw, default=0.0) if remaining_known else None
+    if status == "settled":
+        return amount_paid
+    if status == "partially settled" and remaining is not None:
+        return max(amount_paid - remaining, 0.0)
+    if status == "pending":
+        return 0.0
+    if remaining is not None:
+        return max(amount_paid - remaining, 0.0)
+    return 0.0
+
+
+def _ledger_events(
+    sales_df: pd.DataFrame,
+    payments_df: pd.DataFrame,
+    customer_id: str,
+) -> pd.DataFrame:
+    sales_df = utils.ensure_columns(
+        sales_df,
+        [
+            "Sales_ID",
+            "Date",
+            "Month",
+            "Customer_ID",
+            "Destination",
+            "Total_Amount",
+            "Invoice_No",
+        ],
+    ).copy()
+    payments_df = utils.ensure_columns(
+        payments_df,
+        [
+            "Payment_ID",
+            "Customer_ID",
+            "Invoice_No",
+            "Amount_Paid",
+            "Date",
+            "Mode",
+            "Payment_Status",
+            "Remaining_Amount",
+        ],
+    ).copy()
+
+    sales_df["Customer_ID"] = sales_df["Customer_ID"].astype(str).str.strip()
+    payments_df["Customer_ID"] = payments_df["Customer_ID"].astype(str).str.strip()
+    sales_df = sales_df[sales_df["Customer_ID"] == customer_id]
+    payments_df = payments_df[payments_df["Customer_ID"] == customer_id]
+
+    sales_df["Total_Amount"] = utils.to_numeric_series(
+        sales_df.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    payments_df["Amount_Paid"] = utils.to_numeric_series(
+        payments_df.get("Amount_Paid", pd.Series(dtype=float))
+    ).fillna(0.0)
+
+    sales_dates = utils.parse_date_series(
+        sales_df.get("Date", pd.Series(dtype=str)),
+        month_hint=sales_df["Month"] if "Month" in sales_df.columns else None,
+    ).dt.date
+    payment_dates = utils.parse_date_series(
+        payments_df.get("Date", pd.Series(dtype=str))
+    ).dt.date
+
+    events: list[dict[str, object]] = []
+    for idx, row in sales_df.iterrows():
+        invoice_no = str(row.get("Invoice_No", "")).strip()
+        reference = invoice_no or str(row.get("Sales_ID", "")).strip()
+        destination = str(row.get("Destination", "")).strip()
+        description = "Sale"
+        if destination:
+            description = f"Sale - {destination}"
+        events.append(
+            {
+                "Date": sales_dates.loc[idx],
+                "Type": "Sale",
+                "Reference": reference,
+                "Description": description,
+                "Debit": float(row.get("Total_Amount", 0.0)),
+                "Credit": 0.0,
+                "Applied": 0.0,
+                "_order": 0,
+            }
+        )
+
+    for idx, row in payments_df.iterrows():
+        payment_id = str(row.get("Payment_ID", "")).strip()
+        invoice_ref = str(row.get("Invoice_No", "")).strip()
+        mode = str(row.get("Mode", "")).strip()
+        description_parts = ["Payment received"]
+        if mode:
+            description_parts.append(f"({mode})")
+        if invoice_ref:
+            description_parts.append(f"Invoice {invoice_ref}")
+        description = " ".join(description_parts)
+        applied = _payment_applied_amount(row)
+        events.append(
+            {
+                "Date": payment_dates.loc[idx],
+                "Type": "Payment",
+                "Reference": payment_id,
+                "Description": description,
+                "Debit": 0.0,
+                "Credit": float(row.get("Amount_Paid", 0.0)),
+                "Applied": applied,
+                "_order": 1,
+            }
+        )
+
+    if not events:
+        return pd.DataFrame(
+            columns=[
+                "Date",
+                "Type",
+                "Reference",
+                "Description",
+                "Debit",
+                "Credit",
+                "Running_Balance",
+            ]
+        )
+
+    ledger_df = pd.DataFrame(events)
+    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce")
+    ledger_df["_sort_date"] = ledger_df["_sort_date"].fillna(pd.Timestamp.max)
+    ledger_df["Reference"] = ledger_df["Reference"].astype(str)
+    ledger_df = ledger_df.sort_values(
+        ["_sort_date", "_order", "Reference"], na_position="last"
+    )
+
+    running_balance = 0.0
+    running_values = []
+    for _, row in ledger_df.iterrows():
+        if row["Type"] == "Sale":
+            running_balance += float(row["Debit"])
+        else:
+            running_balance -= float(row["Applied"])
+        running_values.append(running_balance)
+    ledger_df["Running_Balance"] = running_values
+
+    ledger_df = ledger_df.drop(columns=["_sort_date", "_order", "Applied"])
+    return ledger_df
 
 
 def _resolve_invoice_settings(
@@ -312,6 +612,7 @@ def render() -> None:
                 "Date": sale_date.isoformat(),
                 "Fiscal": fiscal_label,
                 "Fiscal Year": fiscal_label,
+                "Fiscal_Year": fiscal_label,
                 "Year": sale_date.strftime("%Y"),
                 "Month": utils.to_month_string(sale_date),
                 "Customer_ID": customer_id,
@@ -687,71 +988,26 @@ def render() -> None:
         else:
             st.info("Sales IDs are missing. Update or rebuild IDs.")
 
-    st.subheader("Customer Outstanding Ledger")
+    st.subheader("Customer Ledger")
     if not has_entries:
         st.info("No sales records available for ledger.")
     else:
-        ledger_source = entries.copy()
-        ledger_source = utils.ensure_columns(
-            ledger_source,
-            [
-                "Sales_ID",
-                "Date",
-                "Customer_ID",
-                "Destination",
-                "No_of_Bricks",
-                "Amount",
-                "Freight",
-                "Total_Amount",
-                "Amount_Received",
-                "Due",
-                "Dues",
-                "Payment_Mode",
-                "Payment_Date",
-                "Invoice_No",
-            ],
-        )
-        ledger_source["Date"] = pd.to_datetime(
-            ledger_source.get("Date", pd.Series(dtype=str)),
-            errors="coerce",
-            dayfirst=True,
-        ).dt.date
-        ledger_source["Payment_Date"] = pd.to_datetime(
-            ledger_source.get("Payment_Date", pd.Series(dtype=str)),
-            errors="coerce",
-            dayfirst=True,
-        ).dt.date
-        for column in [
-            "No_of_Bricks",
-            "Amount",
-            "Freight",
-            "Total_Amount",
-            "Amount_Received",
-            "Due",
-            "Dues",
-        ]:
-            ledger_source[column] = utils.to_numeric_series(
-                ledger_source.get(column, pd.Series(dtype=float))
-            ).fillna(0.0)
-        ledger_source["Due"] = utils.sales_expected_due_series(ledger_source)
-
+        payments_df = database.read_table("Payments")
         ledger_customer_label = st.selectbox(
             "Customer",
             list(customer_labels.keys()),
             key="ledger_customer",
         )
         ledger_customer_id = customer_labels[ledger_customer_label]
-        ledger_source = ledger_source[
-            ledger_source["Customer_ID"].astype(str).str.strip() == ledger_customer_id
-        ]
         customer_row = customers.loc[customers["Customer_ID"] == ledger_customer_id]
         customer_row = customer_row.iloc[0] if not customer_row.empty else pd.Series(dtype=object)
 
-        if ledger_source.empty:
+        ledger_full = _build_customer_ledger(entries, payments_df, ledger_customer_id)
+        if ledger_full.empty:
             st.info("No ledger entries for the selected customer.")
         else:
-            min_date = ledger_source["Date"].dropna().min()
-            max_date = ledger_source["Date"].dropna().max()
+            min_date = ledger_full["Date"].dropna().min()
+            max_date = ledger_full["Date"].dropna().max()
             if pd.isna(min_date) or pd.isna(max_date):
                 min_date = date.today()
                 max_date = date.today()
@@ -766,136 +1022,96 @@ def render() -> None:
                 start_date = min_date
                 end_date = max_date
 
-            ledger_filtered = ledger_source[
-                (ledger_source["Date"] >= start_date)
-                & (ledger_source["Date"] <= end_date)
+            ledger_filtered = ledger_full[
+                (ledger_full["Date"] >= start_date)
+                & (ledger_full["Date"] <= end_date)
             ].copy()
-            only_outstanding = st.checkbox(
-                "Only show outstanding invoices",
-                value=True,
-                key="ledger_only_due",
-            )
-            if only_outstanding:
-                ledger_filtered = ledger_filtered[ledger_filtered["Due"] > 0]
 
-            ledger_key = f"{ledger_customer_id}|{start_date}|{end_date}|{only_outstanding}"
-            if st.session_state.get("ledger_generated_key") != ledger_key:
-                st.session_state["ledger_generated"] = False
-                st.session_state["ledger_generated_key"] = ledger_key
-
-            generate = st.button("Generate Ledger", key="ledger_generate")
-            if generate:
-                st.session_state["ledger_generated"] = True
-
-            if st.session_state.get("ledger_generated"):
-                if ledger_filtered.empty:
-                    st.info(
-                        "No ledger entries match the selected customer, date range, "
-                        "and outstanding filter. Try expanding the date range or "
-                        "turn off 'Only show outstanding invoices'."
-                    )
-                else:
-                    ledger_filtered = ledger_filtered.sort_values("Date")
-                    ledger_filtered["Invoice"] = (
-                        ledger_filtered.get("Invoice_No", pd.Series(dtype=str))
-                        .astype(str)
-                        .str.strip()
-                    )
-                    ledger_filtered["Invoice"] = ledger_filtered["Invoice"].where(
-                        ledger_filtered["Invoice"] != "",
-                        ledger_filtered.get("Sales_ID", pd.Series(dtype=str)).astype(str),
-                    )
-
-                    total_amount = float(ledger_filtered["Total_Amount"].sum())
-                    total_received = float(ledger_filtered["Amount_Received"].sum())
-                    total_due = float(ledger_filtered["Due"].sum())
-
-                    summary_cols = st.columns(3)
-                    summary_cols[0].metric("Total Amount", f"{total_amount:,.2f}")
-                    summary_cols[1].metric("Total Received", f"{total_received:,.2f}")
-                    summary_cols[2].metric("Outstanding", f"{total_due:,.2f}")
-
-                    ledger_view = ledger_filtered[
-                        [
-                            "Date",
-                            "Invoice",
-                            "Destination",
-                            "No_of_Bricks",
-                            "Amount",
-                            "Freight",
-                            "Total_Amount",
-                            "Amount_Received",
-                            "Due",
-                            "Payment_Mode",
-                            "Payment_Date",
-                        ]
-                    ].rename(
-                        columns={
-                            "No_of_Bricks": "Bricks",
-                            "Total_Amount": "Total Amount",
-                            "Amount_Received": "Amount Received",
-                            "Payment_Mode": "Payment Mode",
-                            "Payment_Date": "Payment Date",
-                        }
-                    )
-                    st.dataframe(ledger_view, width="stretch")
-
-                    file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                        ledger_view.to_excel(writer, index=False, sheet_name="Ledger")
-                        summary_df = pd.DataFrame(
-                            [
-                                {
-                                    "Customer": ledger_customer_label,
-                                    "Start_Date": start_date,
-                                    "End_Date": end_date,
-                                    "Total_Amount": total_amount,
-                                    "Total_Received": total_received,
-                                    "Outstanding": total_due,
-                                }
-                            ]
-                        )
-                        summary_df.to_excel(writer, index=False, sheet_name="Summary")
-                    st.download_button(
-                        "Download Ledger (Excel)",
-                        data=output.getvalue(),
-                        file_name=f"ledger_{file_label}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-
-                    company_info, branding = _resolve_invoice_settings(
-                        company_defaults, branding_defaults, payment_defaults
-                    )
-                    period_label = f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"
-                    pdf_rows = ledger_filtered[
-                        [
-                            "Date",
-                            "Invoice",
-                            "No_of_Bricks",
-                            "Amount",
-                            "Freight",
-                            "Total_Amount",
-                            "Amount_Received",
-                            "Due",
-                        ]
-                    ].copy()
-                    pdf_bytes = utils.generate_customer_ledger_pdf(
-                        pdf_rows,
-                        customer_row,
-                        company_info,
-                        branding,
-                        title="Customer Ledger",
-                        period_label=period_label,
-                    )
-                    st.download_button(
-                        "Download Ledger (PDF)",
-                        data=pdf_bytes,
-                        file_name=f"ledger_{file_label}.pdf",
-                        mime="application/pdf",
-                    )
+            if ledger_filtered.empty:
+                st.info(
+                    "No ledger entries match the selected customer and date range. "
+                    "Try expanding the date range."
+                )
             else:
-                st.caption("Select filters above and click Generate Ledger.")
+                total_sales = float(
+                    ledger_filtered.loc[ledger_filtered["Type"] == "Sale", "Debit"].sum()
+                )
+                total_payments = float(
+                    ledger_filtered.loc[ledger_filtered["Type"] == "Payment", "Credit"].sum()
+                )
+                outstanding = float(ledger_filtered["Running_Balance"].iloc[-1])
+
+                summary_cols = st.columns(3)
+                summary_cols[0].metric("Total Sales", f"{total_sales:,.2f}")
+                summary_cols[1].metric("Total Payments", f"{total_payments:,.2f}")
+                summary_cols[2].metric("Outstanding", f"{outstanding:,.2f}")
+
+                ledger_view = ledger_filtered[
+                    [
+                        "Date",
+                        "Type",
+                        "Reference",
+                        "Description",
+                        "Debit",
+                        "Credit",
+                        "Running_Balance",
+                    ]
+                ].rename(columns={"Running_Balance": "Running Balance"})
+                st.dataframe(ledger_view, width="stretch")
+
+                file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    ledger_view.to_excel(writer, index=False, sheet_name="Ledger")
+                    summary_df = pd.DataFrame(
+                        [
+                            {
+                                "Customer": ledger_customer_label,
+                                "Start_Date": start_date,
+                                "End_Date": end_date,
+                                "Total_Sales": total_sales,
+                                "Total_Payments": total_payments,
+                                "Outstanding": outstanding,
+                            }
+                        ]
+                    )
+                    summary_df.to_excel(writer, index=False, sheet_name="Summary")
+                st.download_button(
+                    "Download Ledger (Excel)",
+                    data=output.getvalue(),
+                    file_name=f"ledger_{file_label}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+                company_info, branding = _resolve_invoice_settings(
+                    company_defaults, branding_defaults, payment_defaults
+                )
+                period_label = f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"
+                pdf_rows = ledger_filtered[
+                    [
+                        "Date",
+                        "Type",
+                        "Reference",
+                        "Description",
+                        "Debit",
+                        "Credit",
+                        "Running_Balance",
+                    ]
+                ].rename(columns={"Running_Balance": "Running_Balance"}).copy()
+                pdf_bytes = utils.generate_customer_ledger_pdf(
+                    pdf_rows,
+                    customer_row,
+                    company_info,
+                    branding,
+                    title="Customer Ledger",
+                    period_label=period_label,
+                )
+                st.download_button(
+                    "Download Ledger (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"ledger_{file_label}.pdf",
+                    mime="application/pdf",
+                )
 
     if SHOW_VALIDATION and has_entries:
         st.subheader("Validation")
@@ -997,6 +1213,7 @@ def render() -> None:
                         data["Month"] = utils.to_month_string(entry_date)
                         data["Fiscal"] = fiscal_label
                         data["Fiscal Year"] = fiscal_label
+                        data["Fiscal_Year"] = fiscal_label
                     invoice_current = str(row.get("Invoice_No", "")).strip()
                     if not invoice_current:
                         existing_invoices = (
