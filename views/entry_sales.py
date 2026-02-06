@@ -42,6 +42,7 @@ SALES_COLUMNS = [
 
 SHOW_SALES_RECORDS = False
 SHOW_VALIDATION = False
+GST_RATE = 12.0
 
 
 def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
@@ -154,9 +155,17 @@ def _payment_applied_amount(row: pd.Series) -> float:
 
 def _sale_description(row: pd.Series) -> str:
     destination = str(row.get("Destination", "")).strip()
+    amount = utils.safe_float(row.get("Amount", 0.0))
+    gst = utils.safe_float(row.get("GST", 0.0))
+    freight = utils.safe_float(row.get("Freight", 0.0))
+    total = utils.safe_float(row.get("Total_Amount", 0.0))
+    breakdown = (
+        f"Amount {amount:,.2f}, GST {gst:,.2f}, "
+        f"Freight {freight:,.2f}, Total {total:,.2f}"
+    )
     if destination:
-        return f"Sale to {destination}"
-    return "Sale invoice"
+        return f"Sale to {destination} | {breakdown}"
+    return f"Sale invoice | {breakdown}"
 
 
 def _payment_description(row: pd.Series) -> str:
@@ -184,6 +193,9 @@ def _build_customer_ledger(
             "Month",
             "Customer_ID",
             "Destination",
+            "Amount",
+            "Freight",
+            "GST",
             "Total_Amount",
             "Invoice_No",
         ],
@@ -535,7 +547,8 @@ def render() -> None:
             no_of_bricks = st.number_input("No of Bricks", min_value=0, step=1)
             rate = st.number_input("Rate", min_value=0.0, step=1.0)
         with col2:
-            gst_rate = st.number_input("GST (%)", min_value=0.0, step=1.0, value=12.0)
+            gst_rate = GST_RATE
+            st.text_input("GST (%)", value=f"{GST_RATE:.0f}", disabled=True)
             freight = st.number_input("Freight", min_value=0.0, step=1.0)
             transport_party = st.text_input("Transport Party")
             freight_paid = st.selectbox("Freight Paid", ["No", "Yes"], index=0)
@@ -551,7 +564,7 @@ def render() -> None:
             invoice_no = st.text_input("Invoice No (optional)")
 
         amount = utils.calculate_sales_amount(no_of_bricks, rate)
-        gst_amount = (amount * gst_rate / 100) if gst_rate else 0.0
+        gst_amount = amount * GST_RATE / 100
         total_amount = utils.calculate_total_amount(amount, freight)
         due_display = total_amount - amount_received
 
@@ -1130,9 +1143,16 @@ def render() -> None:
             errors="coerce",
         )
         calc_amount = bricks * rate_val
+        calc_gst = calc_amount * GST_RATE / 100
         calc_total = calc_amount + freight
         calc_due = calc_total - received
         mask = utils.apply_invalid_mask(mask, "Amount", (amount - calc_amount).abs() > 0.01)
+        for gst_col in ["GST", "Gst (%12)"]:
+            if gst_col in entries.columns:
+                gst_series = pd.to_numeric(entries.get(gst_col, pd.Series(dtype=float)), errors="coerce")
+                mask = utils.apply_invalid_mask(
+                    mask, gst_col, (gst_series - calc_gst).abs() > 0.01
+                )
         mask = utils.apply_invalid_mask(
             mask, "Total_Amount", (total_amount - calc_total).abs() > 0.01
         )
@@ -1183,11 +1203,14 @@ def render() -> None:
                     freight_new = utils.safe_float(row.get("Freight", 0))
                     received_new = utils.safe_float(row.get("Amount_Received", 0))
                     amount_new = bricks_val * rate_new
+                    gst_new = amount_new * GST_RATE / 100
                     total_new = amount_new + freight_new
                     due_new = total_new - received_new
 
                     data = row.to_dict()
                     data["Amount"] = amount_new
+                    data["GST"] = gst_new
+                    data["Gst (%12)"] = gst_new
                     data["Total_Amount"] = total_new
                     data["Dues"] = total_new - received_new
                     entry_date = _parse_date(row.get("Date", ""))
