@@ -250,6 +250,21 @@ def _build_customer_ledger(
         payments_df.get("Date", pd.Series(dtype=str)),
     )
 
+    qty_series = utils.to_numeric_series(
+        sales_df.get("No_of_Bricks", pd.Series(dtype=float))
+    ).fillna(0.0)
+    amount_series = utils.to_numeric_series(
+        sales_df.get("Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    gst_series = utils.to_numeric_series(
+        sales_df.get("GST", pd.Series(dtype=float))
+    ).fillna(0.0)
+    gst_alt_series = utils.to_numeric_series(
+        sales_df.get("Gst (%12)", pd.Series(dtype=float))
+    ).fillna(0.0)
+    gst_series = gst_series.where(gst_series > 0, gst_alt_series)
+    gst_series = gst_series.where(gst_series > 0, amount_series * GST_RATE / 100)
+
     sales_events = pd.DataFrame(
         {
             "Date": sales_dates.dt.date,
@@ -262,12 +277,8 @@ def _build_customer_ledger(
                 sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
             ),
             "Description": sales_df.apply(_sale_description, axis=1),
-            "Qty": utils.to_numeric_series(
-                sales_df.get("No_of_Bricks", pd.Series(dtype=float))
-            ).fillna(0.0),
-            "GST": utils.to_numeric_series(
-                sales_df.get("GST", pd.Series(dtype=float))
-            ).fillna(0.0),
+            "Qty": qty_series,
+            "GST": gst_series,
             "Debit": sales_df["Total_Amount"],
             "Credit": 0.0,
             "_applied": 0.0,
