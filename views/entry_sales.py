@@ -1083,7 +1083,12 @@ def render() -> None:
                 company_info, branding = _resolve_invoice_settings(
                     company_defaults, branding_defaults, payment_defaults
                 )
-                period_label = f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"
+                actual_start = ledger_filtered["Date"].dropna().min()
+                actual_end = ledger_filtered["Date"].dropna().max()
+                if pd.isna(actual_start) or pd.isna(actual_end):
+                    actual_start = start_date
+                    actual_end = end_date
+                period_label = f"{actual_start:%d-%b-%Y} to {actual_end:%d-%b-%Y}"
                 pdf_rows = ledger_filtered[
                     [
                         "Date",
