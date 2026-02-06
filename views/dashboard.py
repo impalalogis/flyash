@@ -397,6 +397,7 @@ def render() -> None:
         ["Opening", "Inward", "Consumed", "Closing"],
     )
     customers = database.read_table("Customers")
+    payments = database.read_table("Payments")
 
     all_dates = []
     for frame in [raw_materials, production, sales]:
@@ -678,13 +679,38 @@ def render() -> None:
                 .sum()
                 .reset_index()
             )
+            credit_by_customer = pd.DataFrame(columns=["Customer_ID", "Advance_Credit"])
+            if not payments.empty and "Remaining_Amount" in payments.columns:
+                payment_status = payments.get("Payment_Status", pd.Series(dtype=str)).astype(str)
+                status_lower = payment_status.str.strip().str.lower()
+                remaining = utils.to_numeric_series(
+                    payments.get("Remaining_Amount", pd.Series(dtype=float))
+                ).fillna(0.0)
+                credit_mask = remaining > 0
+                credit_mask &= status_lower != "pending"
+                credit_by_customer = payments.loc[credit_mask, ["Customer_ID"]].copy()
+                credit_by_customer["Advance_Credit"] = remaining.loc[credit_mask]
+                credit_by_customer = (
+                    credit_by_customer.groupby("Customer_ID", dropna=False)["Advance_Credit"]
+                    .sum()
+                    .reset_index()
+                )
             customer_view = customers[["Customer_ID", "Name"]].copy()
             customer_view = customer_view.merge(
                 outstanding_by_customer,
                 on="Customer_ID",
                 how="left",
+            ).merge(
+                credit_by_customer,
+                on="Customer_ID",
+                how="left",
             ).fillna(0.0)
-            customer_view = customer_view.rename(columns={"Outstanding": "Outstanding_Balance"})
+            customer_view["Outstanding"] = (
+                customer_view["Outstanding"] - customer_view["Advance_Credit"]
+            )
+            customer_view = customer_view.rename(
+                columns={"Outstanding": "Outstanding_Balance"}
+            )
             st.dataframe(customer_view, width="stretch")
 
     with col2:
