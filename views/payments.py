@@ -59,12 +59,20 @@ def _sort_by_date(
     return sorted_frame.drop(columns=["_sort_date"])
 
 
+def _ensure_columns(data_frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    data_frame = data_frame.copy()
+    for column in columns:
+        if column not in data_frame.columns:
+            data_frame[column] = ""
+    return data_frame
+
+
 def _reconcile_payments(
     payments_df: pd.DataFrame,
     sales_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    payments_df = utils.ensure_columns(payments_df, PAYMENT_COLUMNS).copy()
-    sales_df = utils.ensure_columns(
+    payments_df = _ensure_columns(payments_df, PAYMENT_COLUMNS)
+    sales_df = _ensure_columns(
         sales_df,
         [
             "Sales_ID",
@@ -79,7 +87,7 @@ def _reconcile_payments(
             "Payment_Date",
             "Payment_ID",
         ],
-    ).copy()
+    )
 
     payments_df["Amount_Paid"] = utils.to_numeric_series(
         payments_df.get("Amount_Paid", pd.Series(dtype=float))
@@ -140,6 +148,7 @@ def _reconcile_payments(
             payment_mode = str(payments_df.at[payment_idx, "Mode"])
             payment_date_value = _format_date_value(payments_df.at[payment_idx, "Date"])
             payment_id_value = str(payments_df.at[payment_idx, "Payment_ID"]).strip()
+            applied_refs: list[str] = []
 
             for sale_idx in sales_indices:
                 if remaining <= 0:
@@ -147,6 +156,11 @@ def _reconcile_payments(
                 dues = float(sales_df.at[sale_idx, "Dues"])
                 if dues <= 0:
                     continue
+                invoice_ref = str(sales_df.at[sale_idx, "Invoice_No"]).strip()
+                if not invoice_ref:
+                    invoice_ref = str(sales_df.at[sale_idx, "Sales_ID"]).strip()
+                if invoice_ref:
+                    applied_refs.append(invoice_ref)
                 if remaining >= dues:
                     remaining -= dues
                     sales_df.at[sale_idx, "Amount_Received"] += dues
@@ -160,6 +174,16 @@ def _reconcile_payments(
                 sales_df.at[sale_idx, "Payment_ID"] = payment_id_value
                 if remaining <= 0:
                     break
+
+            existing_ref = str(payments_df.at[payment_idx, "Invoice_No"]).strip()
+            invoice_values: list[str] = []
+            if existing_ref:
+                invoice_values.extend([value.strip() for value in existing_ref.split(",") if value.strip()])
+            for ref in applied_refs:
+                if ref not in invoice_values:
+                    invoice_values.append(ref)
+            if invoice_values:
+                payments_df.at[payment_idx, "Invoice_No"] = ", ".join(invoice_values)
 
             if remaining <= 0:
                 payments_df.at[payment_idx, "Payment_Status"] = "Settled"
@@ -190,7 +214,8 @@ def render() -> None:
     st.header("Payments")
     st.caption(
         "Invoice No is optional. Use it when the payment matches a single sale; "
-        "leave it blank for combined payments, partials, or advances."
+        "leave it blank for combined payments, partials, or advances. "
+        "Reconciliation runs only when you click Run reconciliation."
     )
 
     customers = database.read_table("Customers")
@@ -256,15 +281,6 @@ def render() -> None:
                 secondary_col="Payment_ID",
             )
             database.replace_table("Payments", payments_sorted, recompute_stock=False)
-
-            payments_after = database.read_table("Payments")
-            sales_after = database.read_table("Sales_Log")
-            reconciled_payments, reconciled_sales = _reconcile_payments(
-                payments_after,
-                sales_after,
-            )
-            database.replace_table("Payments", reconciled_payments, recompute_stock=False)
-            database.replace_table("Sales_Log", reconciled_sales, recompute_stock=False)
 
             outstanding = 0.0
             customer_row = customers.loc[customers["Customer_ID"] == customer_id]
