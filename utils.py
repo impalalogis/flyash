@@ -500,6 +500,7 @@ def generate_invoice_pdf(
     qty = safe_float(sale_row.get("No_of_Bricks", 0))
     rate = safe_float(sale_row.get("Rate", 0))
     amount = safe_float(sale_row.get("Amount", qty * rate))
+    gst_amount = safe_float(sale_row.get("GST", amount * 0.12))
     freight = safe_float(sale_row.get("Freight", 0))
     total = safe_float(sale_row.get("Total_Amount", amount + freight))
     received = safe_float(sale_row.get("Amount_Received", 0))
@@ -511,24 +512,27 @@ def generate_invoice_pdf(
     pdf.drawRightString(150 * mm, table_y - 6 * mm, f"{rate:,.2f}")
     pdf.drawRightString(190 * mm, table_y - 6 * mm, f"{amount:,.2f}")
 
-    pdf.drawString(20 * mm, table_y - 14 * mm, "Freight")
-    pdf.drawRightString(190 * mm, table_y - 14 * mm, f"{freight:,.2f}")
+    pdf.drawString(20 * mm, table_y - 12 * mm, "GST (12%)")
+    pdf.drawRightString(190 * mm, table_y - 12 * mm, f"{gst_amount:,.2f}")
+
+    pdf.drawString(20 * mm, table_y - 18 * mm, "Freight")
+    pdf.drawRightString(190 * mm, table_y - 18 * mm, f"{freight:,.2f}")
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y - 24 * mm, "Total")
-    pdf.drawRightString(190 * mm, table_y - 24 * mm, f"{total:,.2f}")
+    pdf.drawString(20 * mm, table_y - 28 * mm, "Total")
+    pdf.drawRightString(190 * mm, table_y - 28 * mm, f"{total:,.2f}")
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, table_y - 32 * mm, "Amount Received")
-    pdf.drawRightString(190 * mm, table_y - 32 * mm, f"{received:,.2f}")
+    pdf.drawString(20 * mm, table_y - 36 * mm, "Amount Received")
+    pdf.drawRightString(190 * mm, table_y - 36 * mm, f"{received:,.2f}")
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y - 40 * mm, "Balance Due")
-    pdf.drawRightString(190 * mm, table_y - 40 * mm, f"{due:,.2f}")
+    pdf.drawString(20 * mm, table_y - 44 * mm, "Balance Due")
+    pdf.drawRightString(190 * mm, table_y - 44 * mm, f"{due:,.2f}")
 
     footer_y = 18 * mm
     reserved_bottom = footer_y + (40 * mm if (qr_data or payment_details) else 10 * mm)
-    terms_start = table_y - 50 * mm
+    terms_start = table_y - 54 * mm
     if terms:
         pdf.setFont(terms_font_name, 7)
         text = pdf.beginText(20 * mm, terms_start)
