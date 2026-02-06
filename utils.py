@@ -389,6 +389,7 @@ def generate_invoice_pdf(
     from reportlab.graphics.shapes import Drawing
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
+    from reportlab.pdfbase import pdfmetrics
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -916,6 +917,48 @@ def generate_customer_ledger_pdf(
     footer_reserved = 30 * mm if (payment_details or qr_data or signature_bytes) else 18 * mm
     bottom_limit = footer_reserved + 10 * mm
 
+    def _wrap_text(
+        text: str,
+        max_width: float,
+        font_name: str,
+        font_size: int,
+    ) -> list[str]:
+        if not text:
+            return [""]
+        words = text.split()
+        lines: list[str] = []
+        current = ""
+
+        def _flush() -> None:
+            nonlocal current
+            if current:
+                lines.append(current)
+                current = ""
+
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if pdfmetrics.stringWidth(candidate, font_name, font_size) <= max_width:
+                current = candidate
+                continue
+            _flush()
+            if pdfmetrics.stringWidth(word, font_name, font_size) <= max_width:
+                current = word
+                continue
+            part = ""
+            for ch in word:
+                trial = f"{part}{ch}"
+                if pdfmetrics.stringWidth(trial, font_name, font_size) <= max_width:
+                    part = trial
+                else:
+                    if part:
+                        lines.append(part)
+                    part = ch
+            if part:
+                current = part
+
+        _flush()
+        return lines if lines else [text]
+
     def _draw_table_header(y: float) -> float:
         pdf.setFillColor(HexColor("#F2F2F2"))
         pdf.rect(left_x, y - 4 * mm, table_width, 6 * mm, fill=1, stroke=0)
@@ -939,12 +982,9 @@ def generate_customer_ledger_pdf(
         _draw_footer()
     else:
         pdf.setFont("Helvetica", 8)
+        font_name = "Helvetica"
+        font_size = 8
         for _, row in ledger_df.iterrows():
-            if y_position < bottom_limit:
-                _draw_footer()
-                pdf.showPage()
-                y_position = _draw_header()
-                y_position = _draw_table_header(y_position)
             if ledger_mode:
                 balance_col = (
                     "Running_Balance"
@@ -960,6 +1000,18 @@ def generate_customer_ledger_pdf(
                     "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
                     "Balance": f"{safe_float(row.get(balance_col, 0)):,.2f}",
                 }
+                wrap_cols = {"Reference", "Description"}
+                cell_lines: dict[str, list[str]] = {}
+                max_lines = 1
+                for label, width, _ in columns:
+                    text = values.get(label, "")
+                    if label in wrap_cols:
+                        max_width = max(width - (2 * mm), 10)
+                        lines = _wrap_text(text, max_width, font_name, font_size)
+                    else:
+                        lines = [text]
+                    cell_lines[label] = lines
+                    max_lines = max(max_lines, len(lines))
             else:
                 values = {
                     "Date": _format_date(row.get("Date", "")),
@@ -971,15 +1023,28 @@ def generate_customer_ledger_pdf(
                     "Received": f"{safe_float(row.get('Amount_Received', 0)):,.2f}",
                     "Due": f"{safe_float(row.get('Due', 0)):,.2f}",
                 }
-            x = left_x + 1 * mm
-            for label, width, align in columns:
-                text = values.get(label, "")
-                if align == "right":
-                    pdf.drawRightString(x + width - 1 * mm, y_position, text)
-                else:
-                    pdf.drawString(x, y_position, text[:28])
-                x += width
-            y_position -= row_height
+                cell_lines = {label: [values.get(label, "")] for label, _, _ in columns}
+                max_lines = 1
+
+            row_height_total = row_height * max_lines
+            if y_position - row_height_total < bottom_limit:
+                _draw_footer()
+                pdf.showPage()
+                y_position = _draw_header()
+                y_position = _draw_table_header(y_position)
+
+            for line_idx in range(max_lines):
+                x = left_x + 1 * mm
+                y_line = y_position - (line_idx * row_height)
+                for label, width, align in columns:
+                    lines = cell_lines.get(label, [""])
+                    text = lines[line_idx] if line_idx < len(lines) else ""
+                    if align == "right":
+                        pdf.drawRightString(x + width - 1 * mm, y_line, text)
+                    else:
+                        pdf.drawString(x, y_line, text)
+                    x += width
+            y_position -= row_height_total
 
         _draw_footer()
 
