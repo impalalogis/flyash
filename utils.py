@@ -44,6 +44,86 @@ def coerce_numeric_columns(data_frame: pd.DataFrame, columns: Iterable[str]) -> 
     return data_frame
 
 
+def _month_hint_number(value: object) -> int | None:
+    if isinstance(value, datetime):
+        return value.month
+    if isinstance(value, date):
+        return value.month
+    value_str = str(value or "").strip()
+    if not value_str:
+        return None
+    cleaned = re.sub(r"[^a-z]", "", value_str.lower())
+    month_map = {
+        "jan": 1,
+        "january": 1,
+        "feb": 2,
+        "february": 2,
+        "mar": 3,
+        "march": 3,
+        "apr": 4,
+        "april": 4,
+        "may": 5,
+        "jun": 6,
+        "june": 6,
+        "jul": 7,
+        "july": 7,
+        "aug": 8,
+        "august": 8,
+        "sep": 9,
+        "sept": 9,
+        "september": 9,
+        "oct": 10,
+        "october": 10,
+        "nov": 11,
+        "november": 11,
+        "dec": 12,
+        "december": 12,
+    }
+    if cleaned in month_map:
+        return month_map[cleaned]
+    if len(cleaned) >= 3 and cleaned[:3] in month_map:
+        return month_map[cleaned[:3]]
+    digits = re.sub(r"\D", "", value_str)
+    if digits:
+        try:
+            month = int(digits)
+        except ValueError:
+            return None
+        return month if 1 <= month <= 12 else None
+    return None
+
+
+def parse_date_series(
+    series: pd.Series,
+    *,
+    dayfirst: bool = True,
+    month_hint: pd.Series | None = None,
+) -> pd.Series:
+    parsed_dayfirst = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst)
+    if month_hint is None:
+        if parsed_dayfirst.isna().any():
+            parsed_monthfirst = pd.to_datetime(
+                series, errors="coerce", dayfirst=not dayfirst
+            )
+            parsed_dayfirst = parsed_dayfirst.fillna(parsed_monthfirst)
+        return parsed_dayfirst
+
+    parsed_monthfirst = pd.to_datetime(series, errors="coerce", dayfirst=not dayfirst)
+    hint_months = pd.to_numeric(month_hint.apply(_month_hint_number), errors="coerce")
+    day_month = parsed_dayfirst.dt.month
+    month_month = parsed_monthfirst.dt.month
+    use_monthfirst = parsed_monthfirst.notna() & (
+        parsed_dayfirst.isna()
+        | (
+            hint_months.notna()
+            & (day_month != hint_months)
+            & (month_month == hint_months)
+        )
+    )
+    parsed = parsed_dayfirst.where(~use_monthfirst, parsed_monthfirst)
+    return parsed.fillna(parsed_monthfirst)
+
+
 def payment_week_range(entry_date: date, weeks: int) -> tuple[date, date, str]:
     weeks = max(1, int(weeks))
     week_start = entry_date - timedelta(days=entry_date.weekday())
