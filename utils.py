@@ -388,8 +388,7 @@ def generate_invoice_pdf(
     from reportlab.graphics.barcode.qr import QrCodeWidget
     from reportlab.graphics.shapes import Drawing
     from reportlab.lib.utils import ImageReader
-    from reportlab.pdfgen import canvas
-    from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfgen import canvas
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -630,6 +629,7 @@ def generate_customer_ledger_pdf(
     title: str = "Customer Ledger",
     period_label: str = "",
 ) -> bytes:
+    from reportlab.pdfbase import pdfmetrics
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib.colors import HexColor
