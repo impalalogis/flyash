@@ -154,6 +154,9 @@ Notes:
 - Mode
 - Payment_Status
 
+Notes:
+- Invoice_No is optional (use for single-invoice payments; leave blank for advances or combined payments).
+
 **Bank_Statement**
 - Txn_ID
 - Date

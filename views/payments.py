@@ -31,8 +31,126 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
     return options
 
 
+def _merge_payment_mode(existing: object, incoming: object) -> str:
+    existing_val = str(existing or "").strip()
+    incoming_val = str(incoming or "").strip()
+    if not existing_val:
+        return incoming_val
+    if not incoming_val:
+        return existing_val
+    if existing_val.lower() == incoming_val.lower():
+        return existing_val
+    return "Multiple"
+
+
+def _allocate_payment(
+    sales_df: pd.DataFrame,
+    customer_id: str,
+    amount_paid: float,
+    payment_date: date,
+    mode: str,
+    invoice_ref: str,
+) -> tuple[float, pd.DataFrame]:
+    if sales_df.empty or amount_paid <= 0:
+        return 0.0, sales_df
+    sales_df = utils.ensure_columns(
+        sales_df,
+        [
+            "Sales_ID",
+            "Date",
+            "Month",
+            "Customer_ID",
+            "Invoice_No",
+            "Total_Amount",
+            "Amount_Received",
+            "Payment_Mode",
+            "Payment_Date",
+            "Due",
+            "Dues",
+        ],
+    )
+    sales_df = sales_df.copy()
+    sales_df["Total_Amount"] = utils.to_numeric_series(
+        sales_df.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Amount_Received"] = utils.to_numeric_series(
+        sales_df.get("Amount_Received", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Customer_ID"] = sales_df.get("Customer_ID", pd.Series(dtype=str)).astype(str)
+    expected_due = utils.sales_expected_due_series(sales_df)
+    month_hint = sales_df["Month"] if "Month" in sales_df.columns else None
+    date_series = utils.parse_date_series(sales_df.get("Date", pd.Series(dtype=str)), month_hint=month_hint)
+
+    customer_mask = sales_df["Customer_ID"].str.strip() == customer_id
+    due_mask = expected_due > 0.01
+    candidates = sales_df[customer_mask & due_mask].copy()
+    if candidates.empty:
+        return 0.0, sales_df
+
+    candidates["_date_sort"] = date_series.loc[candidates.index]
+    candidates["_date_sort"] = candidates["_date_sort"].fillna(pd.Timestamp.max)
+    candidates = candidates.sort_values(["_date_sort", "Sales_ID"])
+
+    invoice_ref = str(invoice_ref or "").strip()
+    if invoice_ref:
+        match_mask = (
+            candidates.get("Invoice_No", pd.Series(dtype=str)).astype(str).str.strip() == invoice_ref
+        ) | (candidates.get("Sales_ID", pd.Series(dtype=str)).astype(str).str.strip() == invoice_ref)
+        invoice_matches = candidates[match_mask]
+        remaining_candidates = candidates[~match_mask]
+        ordered_indices = list(invoice_matches.index) + list(remaining_candidates.index)
+    else:
+        ordered_indices = list(candidates.index)
+
+    remaining = float(amount_paid)
+    applied = 0.0
+    due_columns = [col for col in ["Due", "Dues"] if col in sales_df.columns]
+
+    for idx in ordered_indices:
+        if remaining <= 0:
+            break
+        row = sales_df.loc[idx]
+        total_amount = float(row.get("Total_Amount", 0.0))
+        received = float(row.get("Amount_Received", 0.0))
+        due = max(total_amount - received, 0.0)
+        if due <= 0:
+            continue
+        apply_amount = min(remaining, due)
+        new_received = received + apply_amount
+        remaining -= apply_amount
+        applied += apply_amount
+
+        new_mode = _merge_payment_mode(row.get("Payment_Mode", ""), mode)
+        payment_iso = payment_date.isoformat()
+
+        update_data = {
+            "Amount_Received": new_received,
+            "Payment_Mode": new_mode,
+            "Payment_Date": payment_iso,
+        }
+        for due_col in due_columns:
+            update_data[due_col] = utils.sales_due_for_column(
+                sales_df, total_amount, new_received, column=due_col
+            )
+        sales_id = str(row.get("Sales_ID", "")).strip()
+        if sales_id:
+            database.update_row("Sales_Log", sales_id, update_data)
+
+        sales_df.at[idx, "Amount_Received"] = new_received
+        sales_df.at[idx, "Payment_Mode"] = new_mode
+        sales_df.at[idx, "Payment_Date"] = payment_iso
+        for due_col in due_columns:
+            sales_df.at[idx, due_col] = update_data[due_col]
+
+    return applied, sales_df
+
+
 def render() -> None:
     st.header("Payments")
+    st.caption(
+        "Invoice No is optional. Use it when the payment matches a single sale; "
+        "leave it blank for combined payments, partials, or advances."
+    )
 
     customers = database.read_table("Customers")
     if customers.empty:
@@ -50,7 +168,7 @@ def render() -> None:
             payment_date = st.date_input("Date", value=date.today())
             customer_label = st.selectbox("Customer", list(customer_labels.keys()))
             customer_id = customer_labels[customer_label]
-            invoice_no = st.text_input("Invoice No")
+            invoice_no = st.text_input("Invoice No (optional)")
         with col2:
             amount_paid = st.number_input("Amount Paid", min_value=0.0, step=1.0)
             mode = st.selectbox(
@@ -66,9 +184,6 @@ def render() -> None:
         errors = []
         if amount_paid <= 0:
             errors.append("Amount Paid must be greater than 0.")
-        if not invoice_no:
-            errors.append("Invoice No is required.")
-
         if errors:
             for error in errors:
                 st.error(error)
@@ -180,7 +295,6 @@ def render() -> None:
     rules = {
         "Date": {"required": True},
         "Customer_ID": {"required": True},
-        "Invoice_No": {"required": True},
         "Amount_Paid": {"numeric": True, "min": 0},
     }
     mask, errors = utils.build_validation_mask(entries, rules)
