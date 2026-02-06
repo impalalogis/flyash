@@ -59,10 +59,12 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
 def _invoice_defaults() -> tuple[dict[str, str], dict[str, object], dict[str, str]]:
     invoice_secrets = st.secrets.get("invoice", {})
     company_defaults = {
-        "name": str(invoice_secrets.get("company_name", "")).strip() or "Fly-Ash Brick Unit",
-        "address": str(invoice_secrets.get("company_address", "")).strip(),
+        "name": str(invoice_secrets.get("company_name", "")).strip()
+        or "IMPALA ECO BRICKS AND TILES",
+        "address": str(invoice_secrets.get("company_address", "")).strip()
+        or "AMIT SINGH, BELDIHA MORE, LAKARKHAWA, BANKA, State Name : Bihar, Code : 10",
         "contact": str(invoice_secrets.get("company_contact", "")).strip(),
-        "gst": str(invoice_secrets.get("company_gst", "")).strip(),
+        "gst": str(invoice_secrets.get("company_gst", "")).strip() or "10BJQPS7761G1ZU",
     }
     branding_defaults = {
         "brand_color": str(invoice_secrets.get("brand_color", "#1F4E79")).strip() or "#1F4E79",
