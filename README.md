@@ -145,7 +145,6 @@ Notes:
 Notes:
 - Fiscal stores FY labels like "FY23-24".
 - Fiscal_Year mirrors Fiscal for compatibility with accounting exports.
-- If your sheet uses `Due` instead of `Dues`, the app handles both.
 - `Gst (%12)` stores the GST amount (12% by default).
 - Invoice_No is auto-generated as `INV-ddmmyyyy-####` if left blank.
 

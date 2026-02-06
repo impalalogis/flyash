@@ -83,7 +83,6 @@ def _reconcile_payments(
             "Total_Amount",
             "Amount_Received",
             "Dues",
-            "Due",
             "Payment_Mode",
             "Payment_Date",
             "Payment_ID",
@@ -257,8 +256,6 @@ def _reconcile_payments(
                 payments_df.at[payment_idx, "Remaining_Amount"] = remaining
 
     sales_df["Dues"] = sales_df["Total_Amount"] - sales_df["Amount_Received"]
-    if "Due" in sales_df.columns:
-        sales_df["Due"] = sales_df["Dues"]
 
     sales_df = _sort_by_date(
         sales_df.drop(columns=["_sort_date"]),
