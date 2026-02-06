@@ -59,12 +59,20 @@ def _sort_by_date(
     return sorted_frame.drop(columns=["_sort_date"])
 
 
+def _ensure_columns(data_frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    data_frame = data_frame.copy()
+    for column in columns:
+        if column not in data_frame.columns:
+            data_frame[column] = ""
+    return data_frame
+
+
 def _reconcile_payments(
     payments_df: pd.DataFrame,
     sales_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    payments_df = utils.ensure_columns(payments_df, PAYMENT_COLUMNS).copy()
-    sales_df = utils.ensure_columns(
+    payments_df = _ensure_columns(payments_df, PAYMENT_COLUMNS)
+    sales_df = _ensure_columns(
         sales_df,
         [
             "Sales_ID",
@@ -79,7 +87,7 @@ def _reconcile_payments(
             "Payment_Date",
             "Payment_ID",
         ],
-    ).copy()
+    )
 
     payments_df["Amount_Paid"] = utils.to_numeric_series(
         payments_df.get("Amount_Paid", pd.Series(dtype=float))
