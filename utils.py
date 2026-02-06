@@ -388,7 +388,7 @@ def generate_invoice_pdf(
     from reportlab.graphics.barcode.qr import QrCodeWidget
     from reportlab.graphics.shapes import Drawing
     from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
+    from reportlab.pdfgen import canvas
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
