@@ -148,6 +148,7 @@ def _reconcile_payments(
             payment_mode = str(payments_df.at[payment_idx, "Mode"])
             payment_date_value = _format_date_value(payments_df.at[payment_idx, "Date"])
             payment_id_value = str(payments_df.at[payment_idx, "Payment_ID"]).strip()
+            applied_refs: list[str] = []
 
             for sale_idx in sales_indices:
                 if remaining <= 0:
@@ -155,6 +156,11 @@ def _reconcile_payments(
                 dues = float(sales_df.at[sale_idx, "Dues"])
                 if dues <= 0:
                     continue
+                invoice_ref = str(sales_df.at[sale_idx, "Invoice_No"]).strip()
+                if not invoice_ref:
+                    invoice_ref = str(sales_df.at[sale_idx, "Sales_ID"]).strip()
+                if invoice_ref:
+                    applied_refs.append(invoice_ref)
                 if remaining >= dues:
                     remaining -= dues
                     sales_df.at[sale_idx, "Amount_Received"] += dues
@@ -168,6 +174,16 @@ def _reconcile_payments(
                 sales_df.at[sale_idx, "Payment_ID"] = payment_id_value
                 if remaining <= 0:
                     break
+
+            existing_ref = str(payments_df.at[payment_idx, "Invoice_No"]).strip()
+            invoice_values: list[str] = []
+            if existing_ref:
+                invoice_values.extend([value.strip() for value in existing_ref.split(",") if value.strip()])
+            for ref in applied_refs:
+                if ref not in invoice_values:
+                    invoice_values.append(ref)
+            if invoice_values:
+                payments_df.at[payment_idx, "Invoice_No"] = ", ".join(invoice_values)
 
             if remaining <= 0:
                 payments_df.at[payment_idx, "Payment_Status"] = "Settled"
