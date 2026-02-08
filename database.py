@@ -271,6 +271,24 @@ def _update_foreign_keys(
     return changed
 
 
+def _refresh_customer_names(table_name: str, name_map: dict[str, str]) -> int:
+    if not name_map:
+        return 0
+    data_frame = read_table(table_name)
+    if data_frame.empty or "Customer_ID" not in data_frame.columns:
+        return 0
+
+    updated = data_frame.copy()
+    if "Customer_Name" not in updated.columns:
+        updated["Customer_Name"] = ""
+    ids = updated["Customer_ID"].astype(str).str.strip()
+    updated_names = ids.map(lambda value: name_map.get(value, "")).fillna("")
+    changed = int((updated["Customer_Name"].astype(str) != updated_names.astype(str)).sum())
+    updated["Customer_Name"] = updated_names
+    replace_table(table_name, updated, recompute_stock=False)
+    return changed
+
+
 def _rebuild_named_ids(
     table_name: str,
     id_column: str,
@@ -411,6 +429,21 @@ def rebuild_all_ids(*, force: bool = False) -> dict[str, int]:
             "Payments",
             "Customer_ID",
             customer_map,
+        )
+    customers_df = read_table("Customers")
+    if not customers_df.empty and "Customer_ID" in customers_df.columns:
+        name_map = (
+            customers_df.set_index("Customer_ID")
+            .get("Name", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .to_dict()
+        )
+        summary["Sales_Log.Customer_Name"] = _refresh_customer_names(
+            "Sales_Log", name_map
+        )
+        summary["Payments.Customer_Name"] = _refresh_customer_names(
+            "Payments", name_map
         )
 
     labour_map, labour_count = _rebuild_named_ids(
