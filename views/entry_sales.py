@@ -102,8 +102,9 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
     for _, row in customers.iterrows():
         customer_id = str(row.get("Customer_ID", "")).strip()
         name = str(row.get("Name", "")).strip()
+        city = str(row.get("City", "")).strip()
         if customer_id:
-            label = f"{customer_id} - {name}" if name else customer_id
+            label = utils.customer_display_label(customer_id, name, city) or customer_id
             options[label] = customer_id
     return options
 
@@ -775,6 +776,23 @@ def render() -> None:
             st.info("No sales records yet.")
         else:
             display_entries = entries.copy()
+            if "Customer_ID" in display_entries.columns:
+                customer_label_map = {}
+                for _, row in customers.iterrows():
+                    customer_id = str(row.get("Customer_ID", "")).strip()
+                    if not customer_id:
+                        continue
+                    label = utils.customer_display_label(
+                        customer_id,
+                        row.get("Name", ""),
+                        row.get("City", ""),
+                    )
+                    if label:
+                        customer_label_map[customer_id] = label
+                display_entries["Customer_ID"] = display_entries["Customer_ID"].astype(str).str.strip()
+                display_entries["Customer_ID"] = display_entries["Customer_ID"].map(
+                    lambda value: customer_label_map.get(value, value)
+                )
             display_entries["Delete"] = False
             display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
             edited = st.data_editor(
