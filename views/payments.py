@@ -27,8 +27,9 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
     for _, row in customers.iterrows():
         customer_id = str(row.get("Customer_ID", "")).strip()
         name = str(row.get("Name", "")).strip()
+        city = str(row.get("City", "")).strip()
         if customer_id:
-            label = f"{customer_id} - {name}" if name else customer_id
+            label = utils.customer_display_label(customer_id, name, city) or customer_id
             options[label] = customer_id
     return options
 
@@ -373,7 +374,25 @@ def render() -> None:
         payments_df = payments_df[payments_df["Customer_ID"] == customer_id]
 
     payments_df = utils.coerce_numeric_columns(payments_df, ["Amount_Paid", "Remaining_Amount"])
-    st.dataframe(payments_df, width="stretch")
+    display_df = payments_df.copy()
+    if "Customer_ID" in display_df.columns:
+        customer_label_map = {}
+        for _, row in customers.iterrows():
+            cust_id = str(row.get("Customer_ID", "")).strip()
+            if not cust_id:
+                continue
+            label = utils.customer_display_label(
+                cust_id,
+                row.get("Name", ""),
+                row.get("City", ""),
+            )
+            if label:
+                customer_label_map[cust_id] = label
+        display_df["Customer_ID"] = display_df["Customer_ID"].astype(str).str.strip()
+        display_df["Customer_ID"] = display_df["Customer_ID"].map(
+            lambda value: customer_label_map.get(value, value)
+        )
+    st.dataframe(display_df, width="stretch")
 
     st.subheader("Reconcile Pending Payments")
     if st.button("Run reconciliation", key="payments_reconcile"):

@@ -236,10 +236,81 @@ def ensure_ids(data_frame: pd.DataFrame, id_column: str, prefix: str, generator)
     return data_frame
 
 
+VOWELS = set("AEIOU")
+
+
 def _name_tokens(name: str) -> list[str]:
     cleaned = re.sub(r"[^A-Za-z0-9 ]+", " ", str(name)).strip()
     tokens = [token for token in cleaned.split() if token]
     return [token.upper() for token in tokens]
+
+
+def _alpha_tokens(name: str) -> list[str]:
+    cleaned = re.sub(r"[^A-Za-z]+", " ", str(name)).strip()
+    return [token for token in cleaned.split() if token]
+
+
+def first_name(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text.split()[0]
+
+
+def customer_display_label(customer_id: object, name: object, city: object) -> str:
+    cust_id = str(customer_id or "").strip()
+    if not cust_id:
+        return ""
+    first = first_name(name) or "NA"
+    city_value = str(city or "").strip() or "NA"
+    return f"{cust_id}-{first}-{city_value}"
+
+
+def _letters_only(token: str) -> list[str]:
+    return [char for char in token.upper() if char.isalpha()]
+
+
+def _first_consonant_or_letter(token: str) -> str:
+    letters = _letters_only(token)
+    if not letters:
+        return "X"
+    for char in letters:
+        if char not in VOWELS:
+            return char
+    return letters[0]
+
+
+def _first_two_letters_for_single(token: str) -> tuple[str, str]:
+    letters = _letters_only(token)
+    consonants = [char for char in letters if char not in VOWELS]
+    first = consonants[0] if consonants else (letters[0] if letters else "X")
+    if len(consonants) >= 2:
+        second = consonants[1]
+    elif len(letters) >= 2:
+        second = letters[1]
+    else:
+        second = "X"
+    return first, second
+
+
+def customer_id_prefix(name: str) -> str:
+    parts = _alpha_tokens(name)
+    if len(parts) >= 3:
+        return (
+            _first_consonant_or_letter(parts[0])
+            + _first_consonant_or_letter(parts[1])
+            + _first_consonant_or_letter(parts[-1])
+        )
+    if len(parts) == 2:
+        return (
+            _first_consonant_or_letter(parts[0])
+            + _first_consonant_or_letter(parts[1])
+            + "X"
+        )
+    if len(parts) == 1:
+        first, second = _first_two_letters_for_single(parts[0])
+        return f"{first}{second}X"
+    return "XXX"
 
 
 def _next_increment(base: str, existing_ids: list[str]) -> int:
@@ -260,6 +331,20 @@ def _next_increment(base: str, existing_ids: list[str]) -> int:
     return max_suffix + 1
 
 
+def _next_customer_increment(prefix: str, existing_ids: list[str]) -> int:
+    prefix_upper = prefix.upper()
+    pattern = re.compile(rf"^{re.escape(prefix_upper)}(\d{{3}})$")
+    max_suffix = 0
+    for value in existing_ids:
+        if not isinstance(value, str):
+            continue
+        value = value.strip().upper()
+        match = pattern.match(value)
+        if match:
+            max_suffix = max(max_suffix, int(match.group(1)))
+    return max_suffix + 1
+
+
 def generate_named_id(prefix: str, name: str, existing_ids: list[str]) -> str:
     tokens = _name_tokens(name)
     first = tokens[0] if tokens else "NAME"
@@ -267,6 +352,12 @@ def generate_named_id(prefix: str, name: str, existing_ids: list[str]) -> str:
     base = f"{prefix}-{first}-{last}"
     suffix = _next_increment(base, existing_ids)
     return f"{base}-{suffix:03d}"
+
+
+def generate_customer_id(name: str, existing_ids: list[str]) -> str:
+    prefix = customer_id_prefix(name).upper()
+    suffix = _next_customer_increment(prefix, existing_ids)
+    return f"{prefix}{suffix:03d}"
 
 
 def _parse_date(value: object) -> date:

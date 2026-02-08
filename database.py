@@ -235,6 +235,10 @@ def generate_named_id(prefix: str, name: str, existing_ids: list[str] | None = N
     return utils.generate_named_id(prefix, name, existing_ids or [])
 
 
+def generate_customer_id(name: str, existing_ids: list[str] | None = None) -> str:
+    return utils.generate_customer_id(name, existing_ids or [])
+
+
 def generate_log_id(prefix: str, entry_date: object, existing_ids: list[str] | None = None) -> str:
     return utils.generate_log_id(prefix, entry_date, existing_ids or [])
 
@@ -305,6 +309,43 @@ def _rebuild_named_ids(
     return mapping, updated_count
 
 
+def _rebuild_customer_ids(
+    *,
+    name_column: str = "Name",
+    force: bool = False,
+) -> tuple[dict[str, str], int]:
+    table_name = "Customers"
+    id_column = "Customer_ID"
+    data_frame = read_table(table_name)
+    if data_frame.empty:
+        return {}, 0
+    data_frame = data_frame.copy()
+    if id_column not in data_frame.columns:
+        data_frame[id_column] = ""
+    if name_column not in data_frame.columns:
+        data_frame[name_column] = ""
+
+    existing_ids = [] if force else (
+        data_frame[id_column].astype(str).str.strip().tolist()
+    )
+    mapping: dict[str, str] = {}
+    updated_count = 0
+    for idx in data_frame.index:
+        old_id = str(data_frame.at[idx, id_column]).strip()
+        if old_id and not force:
+            continue
+        name = str(data_frame.at[idx, name_column])
+        new_id = generate_customer_id(name, existing_ids)
+        data_frame.at[idx, id_column] = new_id
+        existing_ids.append(new_id)
+        if old_id and old_id != new_id:
+            mapping[old_id] = new_id
+        updated_count += 1
+
+    replace_table(table_name, data_frame, recompute_stock=False)
+    return mapping, updated_count
+
+
 def _rebuild_log_ids(
     table_name: str,
     id_column: str,
@@ -358,12 +399,7 @@ def rebuild_all_ids(*, force: bool = False) -> dict[str, int]:
             recompute_stock=False,
         )
 
-    customer_map, customer_count = _rebuild_named_ids(
-        "Customers",
-        "Customer_ID",
-        "CUST",
-        force=force,
-    )
+    customer_map, customer_count = _rebuild_customer_ids(force=force)
     summary["Customers"] = customer_count
     if customer_map:
         summary["Sales_Log.Customer_ID"] = _update_foreign_keys(

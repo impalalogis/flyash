@@ -695,7 +695,19 @@ def render() -> None:
                     .sum()
                     .reset_index()
                 )
-            customer_view = customers[["Customer_ID", "Name"]].copy()
+            customer_view = customers.copy()
+            for column in ["Customer_ID", "Name", "City"]:
+                if column not in customer_view.columns:
+                    customer_view[column] = ""
+            customer_view = customer_view[["Customer_ID", "Name", "City"]].copy()
+            customer_view["Customer"] = customer_view.apply(
+                lambda row: utils.customer_display_label(
+                    row.get("Customer_ID", ""),
+                    row.get("Name", ""),
+                    row.get("City", ""),
+                ),
+                axis=1,
+            )
             customer_view = customer_view.merge(
                 outstanding_by_customer,
                 on="Customer_ID",
@@ -711,6 +723,16 @@ def render() -> None:
             customer_view = customer_view.rename(
                 columns={"Outstanding": "Outstanding_Balance"}
             )
+            customer_view = customer_view[
+                [
+                    "Customer",
+                    "Customer_ID",
+                    "Name",
+                    "City",
+                    "Outstanding_Balance",
+                    "Advance_Credit",
+                ]
+            ]
             st.dataframe(customer_view, width="stretch")
 
     with col2:

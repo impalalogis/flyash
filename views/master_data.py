@@ -19,10 +19,11 @@ SUPPLIERS_COLUMNS = [
 CUSTOMERS_COLUMNS = [
     "Customer_ID",
     "Name",
+    "GST",
     "Contact",
+    "City",
     "Address",
     "Outstanding_Balance",
-    "Credit_Limit",
 ]
 
 LABOUR_COLUMNS = [
@@ -43,6 +44,7 @@ def _edit_table(
     required_columns: list[str],
     numeric_columns: list[str],
     column_config: dict | None = None,
+    id_builder=None,
 ) -> None:
     st.subheader(title)
     data_frame = database.read_table(table_name)
@@ -73,7 +75,10 @@ def _edit_table(
             if current:
                 continue
             name_value = str(updated.at[idx, "Name"]) if "Name" in updated.columns else ""
-            new_id = database.generate_named_id(id_prefix, name_value, existing_ids)
+            if id_builder:
+                new_id = id_builder(name_value, existing_ids)
+            else:
+                new_id = database.generate_named_id(id_prefix, name_value, existing_ids)
             updated.at[idx, id_column] = new_id
             existing_ids.append(new_id)
 
@@ -123,7 +128,8 @@ def render() -> None:
             "CUST",
             "Customer_ID",
             required_columns=["Name"],
-            numeric_columns=["Outstanding_Balance", "Credit_Limit"],
+            numeric_columns=["Outstanding_Balance"],
+            id_builder=database.generate_customer_id,
         )
     with labour_tab:
         _edit_table(

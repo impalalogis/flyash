@@ -38,10 +38,11 @@ Add the following header row (row 1) for each tab:
 **Customers**
 - Customer_ID
 - Name
+- GST
 - Contact
+- City
 - Address
 - Outstanding_Balance
-- Credit_Limit
 
 **Labour**
 - Labour_ID
@@ -355,7 +356,7 @@ PY
    - `streamlit run app.py`
 
 ## ID formats
-- Customers: `CUST-FIRST-LAST-001`
+- Customers: `AAA001` (AAA = consonants from name, 001 = sequence)
 - Suppliers: `SUP-FIRST-LAST-001`
 - Labour: `LAB-FIRST-LAST-001`
 - Logs (RM/PROD/SAL/PAY/ATT): `PREFIX-dd-mm-yy-HHMMSS-001`
@@ -368,7 +369,7 @@ Open Extensions -> Apps Script, paste the script below, and save it.
 ```javascript
 const ID_RULES = {
   Suppliers: { idCol: 1, type: "named", prefix: "SUP", nameCol: 2 },
-  Customers: { idCol: 1, type: "named", prefix: "CUST", nameCol: 2 },
+  Customers: { idCol: 1, type: "customer", nameCol: 2 },
   Labour: { idCol: 1, type: "named", prefix: "LAB", nameCol: 2 },
   Raw_Material_Log: { idCol: 1, type: "log", prefix: "RM", dateCol: 2 },
   Production_Log: { idCol: 1, type: "log", prefix: "PROD", dateCol: 2 },
@@ -435,12 +436,52 @@ function buildId(rule, rowValues, counters) {
     const next = nextCounter(base, counters);
     return `${base}-${pad3(next)}`;
   }
+  if (rule.type === "customer") {
+    const name = rowValues[rule.nameCol - 1];
+    const base = customerPrefix(name);
+    const next = nextCounter(base, counters);
+    return `${base}${pad3(next)}`;
+  }
   const dateValue = rowValues[rule.dateCol - 1];
   const datePart = formatDatePart(dateValue);
   const base = `${rule.prefix}-${datePart}`;
   const next = nextCounter(base, counters);
   const timePart = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "HHmmss");
   return `${base}-${timePart}-${pad3(next)}`;
+}
+
+function customerPrefix(name) {
+  const parts = String(name || "")
+    .replace(/[^A-Za-z ]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t);
+  if (!parts.length) return "XXX";
+  if (parts.length === 1) {
+    const letters = lettersOnly(parts[0]);
+    const consonants = letters.filter((c) => !"AEIOU".includes(c));
+    const first = consonants[0] || letters[0] || "X";
+    const second = consonants[1] || letters[1] || "X";
+    return `${first}${second}X`;
+  }
+  if (parts.length === 2) {
+    return `${firstConsonant(parts[0])}${firstConsonant(parts[1])}X`;
+  }
+  return `${firstConsonant(parts[0])}${firstConsonant(parts[1])}${firstConsonant(parts[parts.length - 1])}`;
+}
+
+function lettersOnly(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "")
+    .split("");
+}
+
+function firstConsonant(value) {
+  const letters = lettersOnly(value);
+  if (!letters.length) return "X";
+  const consonant = letters.find((c) => !"AEIOU".includes(c));
+  return consonant || letters[0];
 }
 
 function nameToken(value, index) {
@@ -475,6 +516,9 @@ function getBase(rule, id) {
   const parts = String(id || "").split("-");
   if (rule.type === "named" && parts.length >= 3) {
     return parts.slice(0, 3).join("-");
+  }
+  if (rule.type === "customer" && parts.length === 1 && /^[A-Z]{3}\d{3}$/.test(parts[0])) {
+    return parts[0].slice(0, 3);
   }
   if (rule.type === "log" && parts.length >= 4) {
     return parts.slice(0, 4).join("-");
