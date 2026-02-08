@@ -21,6 +21,7 @@ SALES_COLUMNS = [
     "Year",
     "Month",
     "Customer_ID",
+    "Customer_Name",
     "Destination",
     "No_of_Bricks",
     "Sale_rate",
@@ -209,13 +210,17 @@ def _payment_applied_amount(row: pd.Series) -> float:
 
 def _sale_description(row: pd.Series) -> str:
     destination = str(row.get("Destination", "")).strip()
+    bricks = utils.safe_float(row.get("No_of_Bricks", 0.0))
+    rate = utils.safe_float(row.get("Rate", 0.0))
+    gst = utils.safe_float(
+        row.get("GST(%12)", row.get("Gst (%12)", row.get("GST", 0.0)))
+    )
     amount = utils.safe_float(row.get("Amount", 0.0))
-    gst = utils.safe_float(row.get("GST", 0.0))
     freight = utils.safe_float(row.get("Freight", 0.0))
     total = utils.safe_float(row.get("Total_Amount", 0.0))
     breakdown = (
-        f"Amount {amount:,.2f}, GST {gst:,.2f}, "
-        f"Freight {freight:,.2f}, Total {total:,.2f}"
+        f"Bricks {bricks:,.0f}, Rate {rate:,.2f}, GST {gst:,.2f}, "
+        f"Amount {amount:,.2f}, Freight {freight:,.2f}, Total {total:,.2f}"
     )
     if destination:
         return f"Sale to {destination} | {breakdown}"
@@ -248,9 +253,12 @@ def _build_customer_ledger(
             "Customer_ID",
             "Destination",
             "No_of_Bricks",
+            "Rate",
             "Amount",
             "Freight",
             "GST",
+            "Gst (%12)",
+            "GST(%12)",
             "Total_Amount",
             "Invoice_No",
         ],
@@ -279,8 +287,6 @@ def _build_customer_ledger(
                 "Type",
                 "Reference",
                 "Description",
-                "Qty",
-                "GST",
                 "Debit",
                 "Credit",
                 "Running_Balance",
@@ -305,21 +311,6 @@ def _build_customer_ledger(
         payments_df.get("Date", pd.Series(dtype=str)),
     )
 
-    qty_series = utils.to_numeric_series(
-        sales_df.get("No_of_Bricks", pd.Series(dtype=float))
-    ).fillna(0.0)
-    amount_series = utils.to_numeric_series(
-        sales_df.get("Amount", pd.Series(dtype=float))
-    ).fillna(0.0)
-    gst_series = utils.to_numeric_series(
-        sales_df.get("GST", pd.Series(dtype=float))
-    ).fillna(0.0)
-    gst_alt_series = utils.to_numeric_series(
-        sales_df.get("Gst (%12)", sales_df.get("GST(%12)", pd.Series(dtype=float)))
-    ).fillna(0.0)
-    gst_series = gst_series.where(gst_series > 0, gst_alt_series)
-    gst_series = gst_series.where(gst_series > 0, amount_series * GST_RATE / 100)
-
     sales_events = pd.DataFrame(
         {
             "Date": sales_dates.dt.date,
@@ -332,8 +323,6 @@ def _build_customer_ledger(
                 sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
             ),
             "Description": sales_df.apply(_sale_description, axis=1),
-            "Qty": qty_series,
-            "GST": gst_series,
             "Debit": sales_df["Total_Amount"],
             "Credit": 0.0,
             "_applied": 0.0,
@@ -348,8 +337,6 @@ def _build_customer_ledger(
             "Type": "Payment",
             "Reference": payment_refs,
             "Description": payments_df.apply(_payment_description, axis=1),
-            "Qty": 0.0,
-            "GST": 0.0,
             "Debit": 0.0,
             "Credit": payments_df["Amount_Paid"],
             "_applied": applied_amounts,
@@ -479,8 +466,6 @@ def _ledger_events(
                 "Type",
                 "Reference",
                 "Description",
-                "Qty",
-                "GST",
                 "Debit",
                 "Credit",
                 "Running_Balance",
@@ -1164,8 +1149,6 @@ def render() -> None:
                         "Type",
                         "Reference",
                         "Description",
-                        "Qty",
-                        "GST",
                         "Debit",
                         "Credit",
                         "Running_Balance",
@@ -1212,8 +1195,6 @@ def render() -> None:
                         "Type",
                         "Reference",
                         "Description",
-                        "Qty",
-                        "GST",
                         "Debit",
                         "Credit",
                         "Running_Balance",

@@ -1,7 +1,6 @@
 import streamlit as st
 
 import database
-from responsive_ui import ResponsiveUI
 from pages import (
     collections_reconciliation,
     dashboard,
@@ -69,14 +68,6 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     st.title("Fly-Ash Brick Manufacturing")
-
-    ui = ResponsiveUI()
-    with st.expander("Responsive UI Demo", expanded=False):
-        col1, col2 = ui.columns_for_screen(2, 2, 1)
-        with col1:
-            ui.responsive_text_input("Customer Name", "cust_name")
-        with col2:
-            ui.responsive_selectbox("State", ["AP", "TS", "KA"], "state")
 
     connected = _init_connection()
     if not connected:
