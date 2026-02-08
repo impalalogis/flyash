@@ -126,6 +126,7 @@ Notes:
 - Year
 - Month
 - Customer_ID
+- Customer_Name
 - Destination
 - No_of_Bricks
 - Sale_rate
@@ -158,6 +159,7 @@ Notes:
 **Payments**
 - Payment_ID
 - Customer_ID
+- Customer_Name
 - Invoice_No
 - Amount_Paid
 - Date

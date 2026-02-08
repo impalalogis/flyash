@@ -569,16 +569,24 @@ def generate_invoice_pdf(
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
     customer_contact = str(customer_row.get("Contact", "")).strip()
+    customer_gst = str(customer_row.get("GST", "")).strip()
     pdf.setFillColor(HexColor(brand_color))
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(20 * mm, height - 72 * mm, "Bill To:")
     pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, height - 77 * mm, customer_name)
+    address_y = height - 82 * mm
     if customer_address:
-        pdf.drawString(20 * mm, height - 82 * mm, customer_address)
+        for line in textwrap.wrap(customer_address, width=70):
+            pdf.drawString(20 * mm, address_y, line)
+            address_y -= 4 * mm
+    contact_y = address_y if customer_address else height - 82 * mm
     if customer_contact:
-        pdf.drawString(20 * mm, height - 87 * mm, f"Contact: {customer_contact}")
+        pdf.drawString(20 * mm, contact_y, f"Contact: {customer_contact}")
+        contact_y -= 4 * mm
+    if customer_gst:
+        pdf.drawString(20 * mm, contact_y, f"GST: {customer_gst}")
 
     table_y = height - 105 * mm
     pdf.setFont("Helvetica-Bold", 9)
@@ -590,7 +598,9 @@ def generate_invoice_pdf(
     qty = safe_float(sale_row.get("No_of_Bricks", 0))
     rate = safe_float(sale_row.get("Rate", 0))
     amount = safe_float(sale_row.get("Amount", qty * rate))
-    gst_amount = safe_float(sale_row.get("GST", amount * 0.12))
+    gst_amount = safe_float(
+        sale_row.get("GST", sale_row.get("Gst (%12)", sale_row.get("GST(%12)", 0)))
+    )
     freight = safe_float(sale_row.get("Freight", 0))
     total = safe_float(sale_row.get("Total_Amount", amount + freight))
     received = safe_float(sale_row.get("Amount_Received", 0))
@@ -896,6 +906,7 @@ def generate_customer_ledger_pdf(
         customer_id = str(customer_row.get("Customer_ID", "")).strip()
         customer_contact = str(customer_row.get("Contact", "")).strip()
         customer_address = str(customer_row.get("Address", "")).strip()
+        customer_gst = str(customer_row.get("GST", "")).strip()
         if customer_name:
             pdf.drawString(20 * mm, y, f"Name: {customer_name}")
             y -= 4 * mm
@@ -905,9 +916,17 @@ def generate_customer_ledger_pdf(
         if customer_contact:
             pdf.drawString(20 * mm, y, f"Contact: {customer_contact}")
             y -= 4 * mm
-        if customer_address:
-            pdf.drawString(20 * mm, y, f"Address: {customer_address}")
+        if customer_gst:
+            pdf.drawString(20 * mm, y, f"GST: {customer_gst}")
             y -= 4 * mm
+        if customer_address:
+            address_lines = textwrap.wrap(customer_address, width=70)
+            if address_lines:
+                pdf.drawString(20 * mm, y, "Address:")
+                y -= 4 * mm
+                for line in address_lines:
+                    pdf.drawString(24 * mm, y, line)
+                    y -= 4 * mm
 
         summary_y = height - 60 * mm
         pdf.setFont("Helvetica-Bold", 9)
@@ -988,11 +1007,9 @@ def generate_customer_ledger_pdf(
     if ledger_mode:
         columns = [
             ("Date", 16 * mm, "left"),
-            ("Type", 14 * mm, "left"),
+            ("Type", 14 * mm, "center"),
             ("Reference", 24 * mm, "left"),
-            ("Description", 38 * mm, "left"),
-            ("Qty", 12 * mm, "right"),
-            ("GST", 14 * mm, "right"),
+            ("Description", 56 * mm, "left"),
             ("Debit", 16 * mm, "right"),
             ("Credit", 16 * mm, "right"),
             ("Balance", 18 * mm, "right"),
@@ -1065,6 +1082,8 @@ def generate_customer_ledger_pdf(
         for label, width, align in columns:
             if align == "right":
                 pdf.drawRightString(x + width - 1 * mm, y, label)
+            elif align == "center":
+                pdf.drawCentredString(x + (width / 2), y, label)
             else:
                 pdf.drawString(x, y, label)
             x += width
@@ -1093,8 +1112,6 @@ def generate_customer_ledger_pdf(
                     "Type": str(row.get("Type", "")).strip(),
                     "Reference": str(row.get("Reference", "")).strip(),
                     "Description": str(row.get("Description", "")).strip(),
-                    "Qty": f"{safe_float(row.get('Qty', 0)):,.0f}",
-                    "GST": f"{safe_float(row.get('GST', 0)):,.2f}",
                     "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
                     "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
                     "Balance": f"{safe_float(row.get(balance_col, 0)):,.2f}",
@@ -1140,6 +1157,8 @@ def generate_customer_ledger_pdf(
                     text = lines[line_idx] if line_idx < len(lines) else ""
                     if align == "right":
                         pdf.drawRightString(x + width - 1 * mm, y_line, text)
+                    elif align == "center":
+                        pdf.drawCentredString(x + (width / 2), y_line, text)
                     else:
                         pdf.drawString(x, y_line, text)
                     x += width

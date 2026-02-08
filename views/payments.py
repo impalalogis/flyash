@@ -13,6 +13,7 @@ import utils
 PAYMENT_COLUMNS = [
     "Payment_ID",
     "Customer_ID",
+    "Customer_Name",
     "Invoice_No",
     "Amount_Paid",
     "Date",
