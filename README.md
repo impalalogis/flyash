@@ -127,9 +127,11 @@ Notes:
 - Customer_ID
 - Destination
 - No_of_Bricks
+- Sale_rate
 - Rate
 - Gst (%12)
 - Amount
+- Freight_rate
 - Freight
 - Transport_Party
 - Total_Amount
@@ -145,7 +147,11 @@ Notes:
 Notes:
 - Fiscal stores FY labels like "FY23-24".
 - Fiscal_Year mirrors Fiscal for compatibility with accounting exports.
+- `Sale_rate` is per-brick price inclusive of GST (and freight if included).
+- `Rate` is base price per brick excluding GST and freight: `(Sale_rate / 1.12) - Freight_rate`.
 - `Gst (%12)` stores the GST amount (12% by default).
+- `Freight_rate` is per-brick freight; `Freight = Freight_rate * No_of_Bricks`.
+- `Total_Amount = Amount + Gst (%12) + Freight`.
 - Invoice_No is auto-generated as `INV-ddmmyyyy-####` if left blank.
 
 **Payments**
