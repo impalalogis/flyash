@@ -4,6 +4,7 @@ import database
 from pages import (
     collections_reconciliation,
     dashboard,
+    dashboard_1,
     labour_attendance,
     master_data,
     payments,
@@ -111,6 +112,7 @@ spreadsheet_id = "YOUR_SHEET_ID"
 
     with st.sidebar.expander("Dashboard", expanded=True):
         _nav_button("Dashboard")
+        _nav_button("Dashboard-1")
 
     with st.sidebar.expander("Operation", expanded=False):
         _nav_button("Labour Attendance")
@@ -135,6 +137,7 @@ spreadsheet_id = "YOUR_SHEET_ID"
     page = st.session_state["page"]
     router = {
         "Dashboard": dashboard.render,
+        "Dashboard-1": dashboard_1.render,
         "Labour Attendance": labour_attendance.render,
         "Raw Material Entry": raw_material_entry.render,
         "Production Entry": production_entry.render,
