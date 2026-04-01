@@ -109,8 +109,15 @@ and the Google Sheet columns used. All calculations respect the selected
 
 ### Expense category split
 - **Meaning:** Expense distribution by category (e.g., office, operational, tractor, diesel, machine parts).
-- **Formula:** `SUM(Expenses.Amount)` grouped by `Category`
-- **Sheet/Columns:** `Expenses` → `Category`, `Amount`
+- **Formula:** `SUM(Expenses.Amount)` grouped by `Expense_Category`
+- **Sheet/Columns:** `Expenses` → `Expense_Category`, `Amount`
+
+### Expense date verification
+- **Meaning:** Whether each expense date matches one or more sales dates.
+- **Formula:** Match on parsed date value between `Expenses.Date` and `Sales_Log.Date`, then write:
+  - `Verified` = `Verified (<n> sales date match(es))` when matches exist
+  - `Verified` = `Not Verified (0 sales date matches)` when no matches exist
+- **Sheet/Columns:** `Expenses` → `Date`, `Verified`; `Sales_Log` → `Date`
 
 ---
 

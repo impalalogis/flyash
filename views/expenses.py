@@ -22,6 +22,7 @@ EXPENSE_COLUMNS = [
     "Payment_Mode",
     "Reference_No",
     "Notes",
+    "Verified",
 ]
 
 
@@ -72,12 +73,96 @@ def _coerce_expense_columns(data_frame: pd.DataFrame) -> pd.DataFrame:
     return utils.coerce_numeric_columns(data_frame, ["Amount"])
 
 
+def _ensure_expense_schema(data_frame: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+    updated = data_frame.copy()
+    changed = False
+    for column in EXPENSE_COLUMNS:
+        if column not in updated.columns:
+            updated[column] = ""
+            changed = True
+    ordered_columns = EXPENSE_COLUMNS + [
+        column for column in updated.columns if column not in EXPENSE_COLUMNS
+    ]
+    return updated[ordered_columns], changed
+
+
+def _to_iso_date(value: object) -> str | None:
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
+    if pd.isna(parsed):
+        return None
+    return parsed.date().isoformat()
+
+
+def _sales_date_match_counts(sales_df: pd.DataFrame) -> dict[str, int]:
+    if sales_df.empty or "Date" not in sales_df.columns:
+        return {}
+    month_hint = sales_df["Month"] if "Month" in sales_df.columns else None
+    parsed = utils.parse_date_series(
+        sales_df.get("Date", pd.Series(dtype=str)),
+        month_hint=month_hint,
+    ).dt.date
+    counts: dict[str, int] = {}
+    for value in parsed.dropna().tolist():
+        key = value.isoformat()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _verification_label(match_count: int | None) -> str:
+    if match_count is None:
+        return "Invalid Date"
+    suffix = "match" if match_count == 1 else "matches"
+    status = "Verified" if match_count > 0 else "Not Verified"
+    return f"{status} ({match_count} sales date {suffix})"
+
+
+def _verification_for_date(value: object, sales_counts: dict[str, int]) -> str:
+    date_key = _to_iso_date(value)
+    if date_key is None:
+        return _verification_label(None)
+    return _verification_label(sales_counts.get(date_key, 0))
+
+
+def _verify_expense_rows(
+    entries: pd.DataFrame,
+    sales_counts: dict[str, int],
+) -> tuple[pd.DataFrame, int]:
+    if entries.empty:
+        return entries.copy(), 0
+    verified = entries.copy()
+    if "Verified" not in verified.columns:
+        verified["Verified"] = ""
+    new_verified = verified.get("Date", pd.Series(dtype=str)).apply(
+        lambda value: _verification_for_date(value, sales_counts)
+    )
+    old_verified = verified["Verified"].astype(str)
+    changed = int((old_verified != new_verified.astype(str)).sum())
+    verified["Verified"] = new_verified
+    return verified, changed
+
+
 def render() -> None:
     st.header("Expenses")
     st.caption(
         "Track business expenses (labour, food, electricity, tractor diesel, "
         "registration bill, machine parts, etc.) for accurate profitability."
     )
+
+    existing_entries = database.read_table("Expenses")
+    existing_entries, schema_changed = _ensure_expense_schema(existing_entries)
+    if schema_changed:
+        database.replace_table("Expenses", existing_entries, recompute_stock=False)
+        existing_entries = database.read_table("Expenses")
+        existing_entries, _ = _ensure_expense_schema(existing_entries)
+        st.info("Expenses sheet updated with required columns, including Verified.")
+
+    sales_logs = database.read_table("Sales_Log")
+    sales_date_counts = _sales_date_match_counts(sales_logs)
 
     with st.form("expense_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -119,7 +204,7 @@ def render() -> None:
                 st.error(error)
         else:
             existing_ids = (
-                database.read_table("Expenses")
+                existing_entries
                 .get("Expense_ID", pd.Series(dtype=str))
                 .astype(str)
                 .str.strip()
@@ -139,6 +224,7 @@ def render() -> None:
                 "Payment_Mode": payment_mode,
                 "Reference_No": reference_no,
                 "Notes": notes,
+                "Verified": _verification_for_date(expense_date, sales_date_counts),
             }
             data = {key: data.get(key, "") for key in EXPENSE_COLUMNS}
             database.insert_row("Expenses", data, recompute_stock=False)
@@ -146,6 +232,11 @@ def render() -> None:
 
     st.subheader("Expense Records")
     entries = database.read_table("Expenses")
+    entries, schema_changed = _ensure_expense_schema(entries)
+    if schema_changed:
+        database.replace_table("Expenses", entries, recompute_stock=False)
+        entries = database.read_table("Expenses")
+        entries, _ = _ensure_expense_schema(entries)
     if entries.empty:
         st.info("No expense records yet.")
         return
@@ -154,6 +245,34 @@ def render() -> None:
         return
 
     entries = _coerce_expense_columns(entries)
+    entries, pending_verifications = _verify_expense_rows(entries, sales_date_counts)
+
+    st.subheader("Date Verification with Sales")
+    verified_series = entries.get("Verified", pd.Series(dtype=str)).astype(str).str.strip()
+    verified_count = int(verified_series.str.startswith("Verified").sum())
+    not_verified_count = int(verified_series.str.startswith("Not Verified").sum())
+    invalid_date_count = int((verified_series == "Invalid Date").sum())
+    ver_col1, ver_col2, ver_col3 = st.columns(3)
+    ver_col1.metric("Verified", verified_count)
+    ver_col2.metric("Not Verified", not_verified_count)
+    ver_col3.metric("Invalid Date", invalid_date_count)
+    st.caption(
+        "Verification checks whether Expense Date matches Sales Date. "
+        "Status includes how many sales-date matches were found."
+    )
+    if st.button("Run full re-verification", key="expense_verify_all"):
+        verified_rows, changed = _verify_expense_rows(entries, sales_date_counts)
+        if changed > 0:
+            database.replace_table("Expenses", verified_rows, recompute_stock=False)
+            st.success(f"Updated verification for {changed} expense row(s).")
+        else:
+            st.info("All expense rows are already verified with current sales dates.")
+        st.rerun()
+    elif pending_verifications > 0:
+        st.warning(
+            f"{pending_verifications} row(s) have outdated verification. "
+            "Click 'Run full re-verification' to sync."
+        )
 
     with st.expander("Update expense", expanded=False):
         editable = entries.copy()
@@ -266,6 +385,7 @@ def render() -> None:
                         "Payment_Mode": upd_mode,
                         "Reference_No": upd_reference,
                         "Notes": upd_notes,
+                        "Verified": _verification_for_date(upd_date, sales_date_counts),
                     }
                     database.update_row(
                         "Expenses",
@@ -357,7 +477,7 @@ def render() -> None:
         edited_invalid = st.data_editor(
             invalid_rows,
             width="stretch",
-            disabled=["Expense_ID"],
+            disabled=[column for column in ["Expense_ID", "Verified"] if column in invalid_rows.columns],
             key="expense_invalid_editor",
         )
         if st.button("Save Corrections", key="expense_save_corrections"):
@@ -374,6 +494,10 @@ def render() -> None:
                 if pd.notna(entry_date):
                     row["Date"] = entry_date.date().isoformat()
                     row["Month"] = utils.to_month_string(entry_date.date())
+                row["Verified"] = _verification_for_date(
+                    row.get("Date", ""),
+                    sales_date_counts,
+                )
                 database.update_row(
                     "Expenses",
                     row_id,

@@ -71,6 +71,8 @@ def render() -> None:
             "Total_Amount",
         ],
     )
+    if "Verified" in expenses.columns:
+        expenses["Verified"] = expenses["Verified"].astype(str)
 
     st.subheader("FY Reconciliation Summary")
     all_dates = []
@@ -144,6 +146,14 @@ def render() -> None:
         month_windows,
     )
     st.dataframe(expense_recon, width="stretch")
+
+    if "Verified" in expenses.columns and not expenses.empty:
+        verified_clean = expenses["Verified"].astype(str).str.strip()
+        verified_yes = verified_clean.str.lower().str.startswith("yes")
+        st.markdown("**Expenses Verification Summary**")
+        ver_col1, ver_col2 = st.columns(2)
+        ver_col1.metric("Verified Expense Rows", int(verified_yes.sum()))
+        ver_col2.metric("Unverified Expense Rows", int((~verified_yes).sum()))
 
     st.subheader("Dashboard Diagnostics")
     with st.expander("Data quality checks", expanded=False):
