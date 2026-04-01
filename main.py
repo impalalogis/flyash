@@ -5,6 +5,7 @@ from pages import (
     collections_reconciliation,
     dashboard,
     dashboard_1,
+    expenses,
     labour_attendance,
     master_data,
     payments,
@@ -123,6 +124,7 @@ spreadsheet_id = "YOUR_SHEET_ID"
     with st.sidebar.expander("Sales", expanded=False):
         _nav_button("Sales Entry")
         _nav_button("Payments")
+        _nav_button("Expenses")
 
     with st.sidebar.expander("Recon", expanded=False):
         _nav_button("Collections & Reconciliation")
@@ -144,6 +146,7 @@ spreadsheet_id = "YOUR_SHEET_ID"
         "Stock": stock.render,
         "Sales Entry": sales_entry.render,
         "Payments": payments.render,
+        "Expenses": expenses.render,
         "Collections & Reconciliation": collections_reconciliation.render,
         "Raw Material Reconciliation": raw_material_reconciliation.render,
         "Weekly Planner": weekly_planner.render,

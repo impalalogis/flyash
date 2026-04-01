@@ -62,10 +62,21 @@ def render() -> None:
             "Dues",
         ],
     )
+    expenses = dashboard_view._parse_dates(database.read_table("Expenses"), "Date")
+    expenses = utils.coerce_numeric_columns(
+        expenses,
+        [
+            "Amount",
+            "GST",
+            "Total_Amount",
+        ],
+    )
+    if "Verified" in expenses.columns:
+        expenses["Verified"] = expenses["Verified"].astype(str)
 
     st.subheader("FY Reconciliation Summary")
     all_dates = []
-    for frame in [raw_materials, production, sales]:
+    for frame in [raw_materials, production, sales, expenses]:
         if not frame.empty and "Date" in frame.columns:
             all_dates.extend(
                 [value for value in frame["Date"].dropna().tolist() if isinstance(value, date)]
@@ -122,6 +133,27 @@ def render() -> None:
     st.markdown("**Raw Material Log**")
     raw_recon = dashboard_view._reconciliation_raw_material_table(raw_materials, month_windows)
     st.dataframe(raw_recon, width="stretch")
+
+    st.markdown("**Expenses Log**")
+    expense_recon = dashboard_view._reconciliation_monthly_table(
+        expenses,
+        "Date",
+        [
+            ("Amount", "Amount"),
+            ("GST", "GST"),
+            ("Total_Amount", "Total_Amount"),
+        ],
+        month_windows,
+    )
+    st.dataframe(expense_recon, width="stretch")
+
+    if "Verified" in expenses.columns and not expenses.empty:
+        verified_clean = expenses["Verified"].astype(str).str.strip()
+        verified_yes = verified_clean.str.lower().str.startswith("yes")
+        st.markdown("**Expenses Verification Summary**")
+        ver_col1, ver_col2 = st.columns(2)
+        ver_col1.metric("Verified Expense Rows", int(verified_yes.sum()))
+        ver_col2.metric("Unverified Expense Rows", int((~verified_yes).sum()))
 
     st.subheader("Dashboard Diagnostics")
     with st.expander("Data quality checks", expanded=False):
@@ -244,6 +276,12 @@ def render() -> None:
             raw_materials,
             "Date",
             ["Total_Cost", "Qty", "Rate"],
+        )
+        _quality_block(
+            "Expenses",
+            expenses,
+            "Date",
+            ["Amount", "GST", "Total_Amount"],
         )
 
         if invalid_records:
