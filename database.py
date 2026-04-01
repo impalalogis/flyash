@@ -21,6 +21,7 @@ ID_COLUMNS = {
     "Production_Log": "Prod_ID",
     "Sales_Log": "Sales_ID",
     "Payments": "Payment_ID",
+    "Expenses": "Expense_ID",
 }
 
 READ_CACHE_TTL = 120
@@ -482,6 +483,12 @@ def rebuild_all_ids(*, force: bool = False) -> dict[str, int]:
         "Payments",
         "Payment_ID",
         "PAY",
+        force=force,
+    )
+    summary["Expenses"] = _rebuild_log_ids(
+        "Expenses",
+        "Expense_ID",
+        "EXP",
         force=force,
     )
     summary["Labour_Attendance"] = _rebuild_log_ids(

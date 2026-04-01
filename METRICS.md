@@ -36,9 +36,14 @@ and the Google Sheet columns used. All calculations respect the selected
 - **Formula:** `SUM(Production_Log.Labour_Expense)`
 - **Sheet/Columns:** `Production_Log` → `Labour_Expense`
 
+### Operational Expense
+- **Meaning:** Total non-production general expenses in the selected scope.
+- **Formula:** `SUM(Expenses.Amount)`
+- **Sheet/Columns:** `Expenses` → `Amount`
+
 ### Profit
-- **Meaning:** Sales minus raw material + labour costs (basic operating view).
-- **Formula:** `Total Sales - (Raw Material Cost + Labour Cost)`
+- **Meaning:** Sales minus all major operating costs.
+- **Formula:** `Total Sales - (Raw Material Cost + Labour Cost + Operational Expense)`
 - **Sheet/Columns:** Uses metrics above.
 
 ### Available Brick Stock
@@ -92,7 +97,7 @@ and the Google Sheet columns used. All calculations respect the selected
 - **Amount:** `SUM(Production_Log.Labour_Expense)`
 
 ### Total Production Cost
-- **Formula:** `Raw Material Cost + Labour Cost`
+- **Formula:** `Raw Material Cost + Labour Cost + Operational Expense`
 
 ### Sales Value
 - **Quantity:** `SUM(Sales_Log.No_of_Bricks)`
@@ -101,6 +106,11 @@ and the Google Sheet columns used. All calculations respect the selected
 
 ### Total Profit
 - **Formula:** `Total Sales - Total Production Cost`
+
+### Expense category split
+- **Meaning:** Expense distribution by category (e.g., office, operational, tractor, diesel, machine parts).
+- **Formula:** `SUM(Expenses.Amount)` grouped by `Category`
+- **Sheet/Columns:** `Expenses` → `Category`, `Amount`
 
 ---
 
@@ -182,6 +192,7 @@ KPI formulas:
 - Profit margin = `Profit / Total Sales`
 - Labour cost share = `Total Labour / Total Cost`
 - Raw material cost share = `Total Raw Material / Total Cost`
+- Operational expense share = `Total Operational Expense / Total Cost`
 - Bricks per labour-day = `Total Production / SUM(No_of_Labour)`
 
 ---

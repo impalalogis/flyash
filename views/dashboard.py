@@ -283,29 +283,93 @@ def _fill_numeric_columns(data_frame: pd.DataFrame, columns: list[str]) -> pd.Da
     return data_frame
 
 
+def _expense_amount_series(data_frame: pd.DataFrame) -> pd.Series:
+    index = data_frame.index
+    amount = utils.to_numeric_series(
+        data_frame.get("Amount", pd.Series(index=index, dtype=float))
+    )
+    qty = utils.to_numeric_series(
+        data_frame.get("Qty", pd.Series(index=index, dtype=float))
+    ).fillna(0.0)
+    rate = utils.to_numeric_series(
+        data_frame.get("Rate", pd.Series(index=index, dtype=float))
+    ).fillna(0.0)
+    tax = utils.to_numeric_series(
+        data_frame.get("Tax_Amount", pd.Series(index=index, dtype=float))
+    ).fillna(0.0)
+    fallback = (qty * rate) + tax
+    if amount.empty:
+        return fallback.fillna(0.0)
+    return amount.where(amount.notna(), fallback).fillna(0.0)
+
+
+def _expense_category_series(data_frame: pd.DataFrame) -> pd.Series:
+    if "Expense_Category" in data_frame.columns:
+        series = data_frame["Expense_Category"]
+    elif "Category" in data_frame.columns:
+        series = data_frame["Category"]
+    else:
+        return pd.Series("Uncategorized", index=data_frame.index, dtype=str)
+    return series.astype(str).str.strip().replace("", "Uncategorized")
+
+
 def _period_cost_summary(
     raw_frame: pd.DataFrame,
     labour_frame: pd.DataFrame,
     sales_frame: pd.DataFrame,
+    expenses_frame: pd.DataFrame,
     freq: str,
 ) -> pd.DataFrame:
     raw_cost = _period_totals(raw_frame, "Date", "Total_Cost", freq, "Raw_Cost")
     labour_cost = _period_totals(labour_frame, "Date", "Labour_Expense", freq, "Labour_Cost")
     freight_cost = _period_totals(sales_frame, "Date", "Freight", freq, "Freight_Cost")
-    summary = raw_cost[["Period", "Period_Label", "Raw_Cost"]].merge(
-        labour_cost[["Period", "Labour_Cost"]],
-        on="Period",
-        how="left",
-    ).merge(
-        freight_cost[["Period", "Freight_Cost"]],
-        on="Period",
-        how="left",
+    expense_cost = _period_totals(expenses_frame, "Date", "Amount", freq, "Expense_Cost")
+    cost_sources = [
+        (raw_cost, "Raw_Cost"),
+        (labour_cost, "Labour_Cost"),
+        (freight_cost, "Freight_Cost"),
+        (expense_cost, "Expense_Cost"),
+    ]
+
+    summary = None
+    for source_df, _ in cost_sources:
+        if source_df.empty:
+            continue
+        if summary is None:
+            summary = source_df[["Period", "Period_Label"]].copy()
+        else:
+            summary = summary.merge(
+                source_df[["Period"]].drop_duplicates(),
+                on="Period",
+                how="outer",
+            )
+    if summary is None:
+        return pd.DataFrame(
+            columns=[
+                "Period",
+                "Period_Label",
+                "Raw_Cost",
+                "Labour_Cost",
+                "Freight_Cost",
+                "Expense_Cost",
+                "Total_Cost",
+            ]
+        )
+
+    for source_df, column in cost_sources:
+        if source_df.empty:
+            summary[column] = 0.0
+        else:
+            summary = summary.merge(source_df[["Period", column]], on="Period", how="left")
+
+    summary = _fill_numeric_columns(
+        summary,
+        ["Raw_Cost", "Labour_Cost", "Freight_Cost", "Expense_Cost"],
     )
-    summary = _fill_numeric_columns(summary, ["Raw_Cost", "Labour_Cost", "Freight_Cost"])
     summary["Total_Cost"] = (
-        summary["Raw_Cost"] + summary["Labour_Cost"] + summary["Freight_Cost"]
+        summary["Raw_Cost"] + summary["Labour_Cost"] + summary["Freight_Cost"] + summary["Expense_Cost"]
     )
-    return summary
+    return summary.sort_values("Period")
 
 
 def _safe_corr(series_a: pd.Series, series_b: pd.Series) -> float | None:
@@ -391,6 +455,27 @@ def render() -> None:
             "Dues",
         ],
     )
+    expenses = _parse_dates(database.read_table("Expenses"), "Date")
+    expenses = utils.coerce_numeric_columns(
+        expenses,
+        [
+            "Amount",
+            "Qty",
+            "Rate",
+            "Tax_Amount",
+            "GST",
+            "Total_Amount",
+        ],
+    )
+    if not expenses.empty:
+        expenses = expenses.copy()
+        expenses["Amount"] = _expense_amount_series(expenses)
+        expenses["Expense_Category"] = _expense_category_series(expenses)
+        if "Expense_Type" not in expenses.columns:
+            expenses["Expense_Type"] = "Unspecified"
+        expenses["Expense_Type"] = (
+            expenses["Expense_Type"].astype(str).str.strip().replace("", "Unspecified")
+        )
     stock_log = _parse_dates(database.read_table("Stock_Log"), "Date")
     stock_log = utils.coerce_numeric_columns(
         stock_log,
@@ -400,7 +485,7 @@ def render() -> None:
     payments = database.read_table("Payments")
 
     all_dates = []
-    for frame in [raw_materials, production, sales]:
+    for frame in [raw_materials, production, sales, expenses]:
         if not frame.empty and "Date" in frame.columns:
             all_dates.extend([d for d in frame["Date"].dropna().tolist() if isinstance(d, date)])
     min_date = min(all_dates) if all_dates else date.today()
@@ -438,10 +523,12 @@ def render() -> None:
         raw_filtered = raw_materials.copy()
         production_filtered = production.copy()
         sales_filtered = sales.copy()
+        expenses_filtered = expenses.copy()
     else:
         raw_filtered = _filter_by_date(raw_materials, "Date", start_date, end_date)
         production_filtered = _filter_by_date(production, "Date", start_date, end_date)
         sales_filtered = _filter_by_date(sales, "Date", start_date, end_date)
+        expenses_filtered = _filter_by_date(expenses, "Date", start_date, end_date)
 
     total_sales = utils.to_numeric_series(
         sales_filtered.get("Amount", pd.Series(dtype=float))
@@ -452,10 +539,12 @@ def render() -> None:
     total_labour = utils.to_numeric_series(
         production_filtered.get("Labour_Expense", pd.Series(dtype=float))
     ).fillna(0.0).sum()
+    total_expense_cost = _expense_amount_series(expenses_filtered).fillna(0.0).sum()
     total_production = utils.to_numeric_series(
         production_filtered.get("No_of_Bricks", pd.Series(dtype=float))
     ).fillna(0.0).sum()
-    profit = total_sales - (total_raw_cost + total_labour)
+    total_operating_cost = total_raw_cost + total_labour + total_expense_cost
+    profit = total_sales - total_operating_cost
     total_sold_bricks = utils.to_numeric_series(
         sales_filtered.get("No_of_Bricks", pd.Series(dtype=float))
     ).fillna(0.0).sum()
@@ -465,6 +554,7 @@ def render() -> None:
     avg_price = (total_sales / total_sold_bricks) if total_sold_bricks else 0.0
     labour_per_1000 = (total_labour / total_production * 1000) if total_production else 0.0
     material_per_1000 = (total_raw_cost / total_production * 1000) if total_production else 0.0
+    expense_per_1000 = (total_expense_cost / total_production * 1000) if total_production else 0.0
     collection_ratio = (total_received / total_sales) if total_sales else 0.0
 
     if scope == "Full data":
@@ -478,7 +568,10 @@ def render() -> None:
             production.get("Date", pd.Series(dtype=str)),
             month_hint=prod_month_hint,
         ).isna()
-        if invalid_sales_dates.any() or invalid_prod_dates.any():
+        invalid_expense_dates = utils.parse_date_series(
+            expenses.get("Date", pd.Series(dtype=str)),
+        ).isna()
+        if invalid_sales_dates.any() or invalid_prod_dates.any() or invalid_expense_dates.any():
             st.caption(
                 "Full data includes rows with invalid dates. "
                 "Time-based charts exclude those rows."
@@ -499,12 +592,13 @@ def render() -> None:
         production_filtered["Date"].dropna().nunique() if not production_filtered.empty else 0
     )
 
-    row1 = st.columns(5)
+    row1 = st.columns(6)
     row1[0].metric("Total Production", f"{total_production:,.0f}")
     row1[1].metric("Total Sales", f"{total_sales:,.2f}")
     row1[2].metric("Raw Material Cost", f"{total_raw_cost:,.2f}")
     row1[3].metric("Labour Cost", f"{total_labour:,.2f}")
-    row1[4].metric("Profit", f"{profit:,.2f}")
+    row1[4].metric("Operational Expense", f"{total_expense_cost:,.2f}")
+    row1[5].metric("Profit", f"{profit:,.2f}")
 
     row2 = st.columns(5)
     row2[0].metric("Available Brick Stock", f"{current_inventory:,.0f}")
@@ -578,10 +672,16 @@ def render() -> None:
             "Amount (₹)": f"{total_labour:,.0f}",
         },
         {
+            "Item": "Operational Expense",
+            "Quantity": "",
+            "Rate": "",
+            "Amount (₹)": f"{total_expense_cost:,.0f}",
+        },
+        {
             "Item": "Total Production Cost",
             "Quantity": "",
             "Rate": "",
-            "Amount (₹)": f"{(total_raw_cost + total_labour):,.0f}",
+            "Amount (₹)": f"{total_operating_cost:,.0f}",
         },
         {
             "Item": "Sales Value",
@@ -713,7 +813,12 @@ def render() -> None:
     # Supplementary metrics and capacity utilization removed per request
 
     st.subheader("Period Performance")
-    if sales_filtered.empty and raw_filtered.empty and production_filtered.empty:
+    if (
+        sales_filtered.empty
+        and raw_filtered.empty
+        and production_filtered.empty
+        and expenses_filtered.empty
+    ):
         st.info("No data available for the selected range.")
     else:
         sales_period = _add_period_column(sales_filtered, "Date", period)
@@ -747,6 +852,8 @@ def render() -> None:
             errors="coerce",
             dayfirst=True,
         ).dt.date
+        expenses_period = _add_period_column(expenses_filtered, "Date", period)
+        expenses_period["Amount"] = _expense_amount_series(expenses_period).fillna(0.0)
 
         sales_summary = (
             sales_period.groupby("Period", dropna=False)["Amount"]
@@ -772,14 +879,23 @@ def render() -> None:
             .reset_index()
             .rename(columns={"Labour_Expense": "Labour_Cost"})
         )
+        expense_summary = (
+            expenses_period.groupby("Period", dropna=False)["Amount"]
+            .sum()
+            .reset_index()
+            .rename(columns={"Amount": "Expense_Cost"})
+        )
 
         summary = (
             sales_summary.merge(prod_summary, on="Period", how="outer")
             .merge(raw_summary, on="Period", how="outer")
             .merge(labour_summary, on="Period", how="outer")
+            .merge(expense_summary, on="Period", how="outer")
         )
         summary = summary.fillna(0)
-        summary["Total_Cost"] = summary["Raw_Material_Cost"] + summary["Labour_Cost"]
+        summary["Total_Cost"] = (
+            summary["Raw_Material_Cost"] + summary["Labour_Cost"] + summary["Expense_Cost"]
+        )
         summary["Avg_Price"] = summary.apply(
             lambda row: (row["Sales"] / row["Production"]) if row["Production"] else 0.0,
             axis=1,
@@ -802,7 +918,7 @@ def render() -> None:
         st.subheader("Cost Breakdown")
         cost_melt = summary.melt(
             id_vars=["Period"],
-            value_vars=["Raw_Material_Cost", "Labour_Cost"],
+            value_vars=["Raw_Material_Cost", "Labour_Cost", "Expense_Cost"],
             var_name="Cost_Type",
             value_name="Amount",
         )
@@ -1094,9 +1210,28 @@ def render() -> None:
     freight_cost = utils.to_numeric_series(
         sales_filtered.get("Freight", pd.Series(dtype=float))
     ).fillna(0.0).sum()
+    expense_category_summary = (
+        expenses_filtered.groupby("Expense_Category", dropna=False)["Amount"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Expense_Category": "Category", "Amount": "Amount"})
+        .sort_values("Amount", ascending=False)
+        if not expenses_filtered.empty
+        else pd.DataFrame(columns=["Category", "Amount"])
+    )
+    expense_type_summary = (
+        expenses_filtered.groupby("Expense_Type", dropna=False)["Amount"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Expense_Type": "Expense_Type", "Amount": "Amount"})
+        .sort_values("Amount", ascending=False)
+        if not expenses_filtered.empty
+        else pd.DataFrame(columns=["Expense_Type", "Amount"])
+    )
     cost_rows = [
         ("Raw materials", raw_cost),
         ("Labour", total_labour),
+        ("Operational expenses", total_expense_cost),
         ("Freight (sales)", freight_cost),
         ("Transport & Diesel", transport_cost),
         ("Maintenance", maintenance_cost),
@@ -1112,6 +1247,7 @@ def render() -> None:
         "Labour_Cost",
     )
     freight_cost_month = _period_totals(sales_filtered, "Date", "Freight", "M", "Freight_Cost")
+    expense_cost_month = _period_totals(expenses_filtered, "Date", "Amount", "M", "Expense_Cost")
     cost_month = prod_month[["Period", "Period_Label", "Production"]].merge(
         raw_cost_month[["Period", "Raw_Cost"]],
         on="Period",
@@ -1124,9 +1260,16 @@ def render() -> None:
         freight_cost_month[["Period", "Freight_Cost"]],
         on="Period",
         how="left",
+    ).merge(
+        expense_cost_month[["Period", "Expense_Cost"]],
+        on="Period",
+        how="left",
     ).fillna(0.0)
     cost_month["Total_Cost"] = (
-        cost_month["Raw_Cost"] + cost_month["Labour_Cost"] + cost_month["Freight_Cost"]
+        cost_month["Raw_Cost"]
+        + cost_month["Labour_Cost"]
+        + cost_month["Freight_Cost"]
+        + cost_month["Expense_Cost"]
     )
     cost_month["Cost_per_Brick"] = cost_month["Total_Cost"].div(
         cost_month["Production"].replace(0, pd.NA)
@@ -1396,6 +1539,13 @@ def render() -> None:
                 ]
             )
             st.dataframe(cost_table, width="stretch")
+
+            if not expense_category_summary.empty:
+                st.markdown("**Expenses by category**")
+                st.dataframe(expense_category_summary, width="stretch")
+            if not expense_type_summary.empty:
+                st.markdown("**Expenses by type (short-term / long-term)**")
+                st.dataframe(expense_type_summary, width="stretch")
 
             top_cost = cost_month.sort_values("Cost_per_Brick", ascending=False).head(3)
             st.markdown("**Highest cost per brick (monthly)**")
@@ -1675,7 +1825,13 @@ def render() -> None:
                 )
 
             st.markdown("**Profitability trends**")
-            cost_month_summary = _period_cost_summary(raw_filtered, production_filtered, sales_filtered, "M")
+            cost_month_summary = _period_cost_summary(
+                raw_filtered,
+                production_filtered,
+                sales_filtered,
+                expenses_filtered,
+                "M",
+            )
             sales_amount_month = _period_totals(
                 sales_filtered,
                 "Date",
@@ -1772,6 +1928,9 @@ def render() -> None:
             profit_margin = (profit / total_sales) if total_sales else None
             labour_cost_share = (total_labour / total_cost) if total_cost else None
             raw_cost_share = (total_raw_cost / total_cost) if total_cost else None
+            operational_expense_share = (
+                total_expense_cost / total_cost if total_cost else None
+            )
 
             def _status(value: float | None, low: float, high: float) -> str:
                 if value is None or pd.isna(value):
@@ -1889,6 +2048,26 @@ def render() -> None:
                     },
                 },
                 {
+                    "name": "Operational expense share",
+                    "value": operational_expense_share,
+                    "low": 0.05,
+                    "high": 0.25,
+                    "format": "{:.1%}",
+                    "definition": "Operational expense divided by total cost.",
+                    "range": "5% - 25%",
+                    "why": "Highlights overhead burden and cost control opportunity.",
+                    "meaning": {
+                        "Low": "Overheads are low or not fully captured.",
+                        "Normal": "Operational overhead is in a workable range.",
+                        "High": "Overheads are high and can reduce profitability.",
+                    },
+                    "improve": {
+                        "Low": "Verify expense logging completeness.",
+                        "High": "Control discretionary spend and renegotiate recurring bills.",
+                        "Normal": "Track monthly and keep category budgets.",
+                    },
+                },
+                {
                     "name": "Bricks per labour-day",
                     "value": bricks_per_labour,
                     "low": 800,
@@ -1957,9 +2136,17 @@ def render() -> None:
                 recommendations.append(
                     "Raw materials are the largest cost driver. Negotiate supplier rates and lock pricing ahead of peak months."
                 )
+            if total_cost and total_expense_cost / total_cost > 0.2:
+                recommendations.append(
+                    "Operational expenses are a high share of total cost. Review category-wise spending and cut non-essential items."
+                )
             if labour_per_1000 > 0:
                 recommendations.append(
                     f"Labour cost per 1000 bricks is {labour_per_1000:,.2f}. Monitor labour allocation and reduce idle time."
+                )
+            if expense_per_1000 > 0:
+                recommendations.append(
+                    f"Operational expense per 1000 bricks is {expense_per_1000:,.2f}. Use category budgets for short-term and long-term planning."
                 )
             if not recommendations:
                 recommendations.append(
