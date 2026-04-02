@@ -345,6 +345,7 @@ company_contact = "99999 99999"
 company_gst = "GSTIN"
 brand_color = "#1F4E79"
 logo_base64 = "BASE64_STRING"
+authorized_signature_base64 = "BASE64_STRING"
 signature_base64 = "BASE64_STRING"
 font_ttf_base64 = "BASE64_STRING"
 watermark_text = "Fly-Ash Brick Unit"
@@ -357,6 +358,9 @@ payment_note = "Pay within 7 days."
 qr_data = ""
 terms = "Goods once sold will not be taken back."
 ```
+
+`authorized_signature_base64` is used as the authorized signatory on both invoice and ledger PDFs.
+`signature_base64` is still accepted for backward compatibility.
 
 To get base64:
 ```
