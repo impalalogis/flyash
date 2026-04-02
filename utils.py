@@ -568,6 +568,7 @@ def generate_invoice_pdf(
 
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
+    customer_city = str(customer_row.get("City", "")).strip()
     customer_contact = str(customer_row.get("Contact", "")).strip()
     customer_gst = str(customer_row.get("GST", "")).strip()
     pdf.setFillColor(HexColor(brand_color))
@@ -576,12 +577,22 @@ def generate_invoice_pdf(
     pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, height - 77 * mm, customer_name)
-    address_y = height - 82 * mm
+    address_parts = []
     if customer_address:
-        for line in textwrap.wrap(customer_address, width=70):
+        address_parts.append(customer_address)
+    if customer_city:
+        city_present_in_address = customer_city.lower() in customer_address.lower()
+        if not city_present_in_address:
+            address_parts.append(customer_city)
+    bill_to_address = ", ".join([part for part in address_parts if part]).strip()
+
+    address_y = height - 82 * mm
+    if bill_to_address:
+        wrapped_address = textwrap.wrap(f"Address: {bill_to_address}", width=70)
+        for line in wrapped_address:
             pdf.drawString(20 * mm, address_y, line)
             address_y -= 4 * mm
-    contact_y = address_y if customer_address else height - 82 * mm
+    contact_y = address_y if bill_to_address else height - 82 * mm
     if customer_contact:
         pdf.drawString(20 * mm, contact_y, f"Contact: {customer_contact}")
         contact_y -= 4 * mm
