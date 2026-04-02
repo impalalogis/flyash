@@ -112,9 +112,12 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
 
 def _invoice_defaults() -> tuple[dict[str, str], dict[str, object], dict[str, str]]:
     invoice_secrets = st.secrets.get("invoice", {})
-    signature_bytes = utils.decode_base64_data(
+    signature_source = (
         invoice_secrets.get("authorized_signature_base64")
-    ) or utils.decode_base64_data(invoice_secrets.get("signature_base64"))
+        or invoice_secrets.get("authorized_signature")
+        or invoice_secrets.get("signature_base64")
+    )
+    signature_bytes = utils.resolve_binary_data(signature_source)
     company_defaults = {
         "name": str(invoice_secrets.get("company_name", "")).strip()
         or "IMPALA ECO BRICKS AND TILES",
@@ -125,9 +128,9 @@ def _invoice_defaults() -> tuple[dict[str, str], dict[str, object], dict[str, st
     }
     branding_defaults = {
         "brand_color": str(invoice_secrets.get("brand_color", "#1F4E79")).strip() or "#1F4E79",
-        "logo_bytes": utils.decode_base64_data(invoice_secrets.get("logo_base64")),
+        "logo_bytes": utils.resolve_binary_data(invoice_secrets.get("logo_base64")),
         "signature_bytes": signature_bytes,
-        "font_bytes": utils.decode_base64_data(invoice_secrets.get("font_ttf_base64")),
+        "font_bytes": utils.resolve_binary_data(invoice_secrets.get("font_ttf_base64")),
         "terms": str(invoice_secrets.get("terms", "")).strip(),
         "watermark_text": str(invoice_secrets.get("watermark_text", "")).strip(),
     }

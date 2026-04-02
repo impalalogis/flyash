@@ -9,6 +9,8 @@ import io
 import os
 import tempfile
 import textwrap
+from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 import pandas as pd
 
@@ -437,6 +439,61 @@ def decode_base64_data(value: str | None) -> bytes | None:
         return base64.b64decode(data)
     except (ValueError, binascii.Error, TypeError):
         return None
+
+
+def _extract_google_drive_file_id(value: str) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_-]{20,}", raw):
+        return raw
+    parsed = urlparse(raw)
+    host = parsed.netloc.lower()
+    if "drive.google.com" not in host and "docs.google.com" not in host:
+        return None
+    match = re.search(r"/d/([A-Za-z0-9_-]{20,})", parsed.path)
+    if match:
+        return match.group(1)
+    query_id = parse_qs(parsed.query).get("id", [""])[0].strip()
+    return query_id or None
+
+
+def _download_binary_data(url: str, *, timeout: int = 15) -> bytes | None:
+    try:
+        request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(request, timeout=timeout) as response:
+            payload = response.read()
+    except Exception:
+        return None
+    if not payload:
+        return None
+    # Avoid treating HTML interstitial pages as signature/font bytes.
+    if payload[:200].lstrip().lower().startswith(b"<html"):
+        return None
+    return payload
+
+
+def resolve_binary_data(value: str | None) -> bytes | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    drive_id = _extract_google_drive_file_id(raw)
+    if drive_id:
+        for candidate in (
+            f"https://drive.google.com/uc?export=download&id={drive_id}",
+            f"https://drive.google.com/uc?id={drive_id}",
+        ):
+            downloaded = _download_binary_data(candidate)
+            if downloaded:
+                return downloaded
+
+    if re.match(r"^https?://", raw, flags=re.IGNORECASE):
+        downloaded = _download_binary_data(raw)
+        if downloaded:
+            return downloaded
+
+    return decode_base64_data(raw)
 
 
 def register_ttf_font(font_bytes: bytes | None, font_name: str = "InvoiceFont") -> str | None:
