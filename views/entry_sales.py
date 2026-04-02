@@ -112,6 +112,9 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
 
 def _invoice_defaults() -> tuple[dict[str, str], dict[str, object], dict[str, str]]:
     invoice_secrets = st.secrets.get("invoice", {})
+    signature_bytes = utils.decode_base64_data(
+        invoice_secrets.get("authorized_signature_base64")
+    ) or utils.decode_base64_data(invoice_secrets.get("signature_base64"))
     company_defaults = {
         "name": str(invoice_secrets.get("company_name", "")).strip()
         or "IMPALA ECO BRICKS AND TILES",
@@ -123,7 +126,7 @@ def _invoice_defaults() -> tuple[dict[str, str], dict[str, object], dict[str, st
     branding_defaults = {
         "brand_color": str(invoice_secrets.get("brand_color", "#1F4E79")).strip() or "#1F4E79",
         "logo_bytes": utils.decode_base64_data(invoice_secrets.get("logo_base64")),
-        "signature_bytes": utils.decode_base64_data(invoice_secrets.get("signature_base64")),
+        "signature_bytes": signature_bytes,
         "font_bytes": utils.decode_base64_data(invoice_secrets.get("font_ttf_base64")),
         "terms": str(invoice_secrets.get("terms", "")).strip(),
         "watermark_text": str(invoice_secrets.get("watermark_text", "")).strip(),
@@ -517,7 +520,8 @@ def _resolve_invoice_settings(
         or branding_defaults["brand_color"],
         "logo_bytes": st.session_state.get("invoice_logo_bytes")
         or branding_defaults["logo_bytes"],
-        "signature_bytes": st.session_state.get("invoice_signature_bytes")
+        "signature_bytes": st.session_state.get("invoice_authorized_signature_bytes")
+        or st.session_state.get("invoice_signature_bytes")
         or branding_defaults["signature_bytes"],
         "font_bytes": st.session_state.get("invoice_font_bytes")
         or branding_defaults["font_bytes"],
@@ -902,7 +906,7 @@ def render() -> None:
 
                     with st.expander("Branding", expanded=False):
                         logo_bytes = None
-                        signature_bytes = None
+                        authorized_signature_bytes = None
                         font_bytes = branding_defaults["font_bytes"]
                         override_branding = st.checkbox(
                             "Override branding for this invoice",
@@ -916,9 +920,9 @@ def render() -> None:
                                 key="invoice_logo",
                             )
                             signature_file = st.file_uploader(
-                                "Signature (PNG/JPG)",
+                                "Authorized Signature (PNG/JPG)",
                                 type=["png", "jpg", "jpeg"],
-                                key="invoice_signature",
+                                key="invoice_authorized_signature",
                             )
                             brand_color = st.color_picker(
                                 "Brand color",
@@ -943,20 +947,24 @@ def render() -> None:
                             if logo_file:
                                 st.session_state["invoice_logo_bytes"] = logo_file.getvalue()
                             if signature_file:
-                                st.session_state["invoice_signature_bytes"] = (
+                                st.session_state["invoice_authorized_signature_bytes"] = (
                                     signature_file.getvalue()
                                 )
+                                # Backward compatibility with older key naming.
+                                st.session_state["invoice_signature_bytes"] = signature_file.getvalue()
                             st.session_state["invoice_brand_color"] = brand_color
                             st.session_state["invoice_watermark_text"] = watermark_text
                             st.session_state["invoice_terms"] = terms
                             logo_bytes = st.session_state.get("invoice_logo_bytes")
-                            signature_bytes = st.session_state.get("invoice_signature_bytes")
+                            authorized_signature_bytes = st.session_state.get(
+                                "invoice_authorized_signature_bytes"
+                            ) or st.session_state.get("invoice_signature_bytes")
                         else:
                             brand_color = branding_defaults["brand_color"]
                             terms = branding_defaults["terms"]
                             watermark_text = branding_defaults["watermark_text"]
                             logo_bytes = branding_defaults["logo_bytes"]
-                            signature_bytes = branding_defaults["signature_bytes"]
+                            authorized_signature_bytes = branding_defaults["signature_bytes"]
                             font_bytes = branding_defaults["font_bytes"]
                             st.color_picker("Brand color", value=brand_color, disabled=True)
                             st.text_input(
@@ -968,7 +976,9 @@ def render() -> None:
                             st.write(
                                 {
                                     "logo": "set" if logo_bytes else "not set",
-                                    "signature": "set" if signature_bytes else "not set",
+                                    "authorized_signature": (
+                                        "set" if authorized_signature_bytes else "not set"
+                                    ),
                                     "font": "set" if font_bytes else "not set",
                                 }
                             )
@@ -1059,7 +1069,7 @@ def render() -> None:
                         },
                         {
                             "logo_bytes": logo_bytes,
-                            "signature_bytes": signature_bytes,
+                            "signature_bytes": authorized_signature_bytes,
                             "brand_color": brand_color,
                             "terms": terms,
                             "font_bytes": font_bytes,
