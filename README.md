@@ -345,8 +345,8 @@ company_contact = "99999 99999"
 company_gst = "GSTIN"
 brand_color = "#1F4E79"
 logo_base64 = "BASE64_STRING"
-authorized_signature_base64 = "BASE64_STRING"
-signature_base64 = "BASE64_STRING"
+authorized_signature_base64 = "BASE64_STRING_OR_DRIVE_FILE_ID"
+signature_base64 = "BASE64_STRING_OR_DRIVE_FILE_ID"
 font_ttf_base64 = "BASE64_STRING"
 watermark_text = "Fly-Ash Brick Unit"
 upi_id = "your@upi"
@@ -361,6 +361,10 @@ terms = "Goods once sold will not be taken back."
 
 `authorized_signature_base64` is used as the authorized signatory on both invoice and ledger PDFs.
 `signature_base64` is still accepted for backward compatibility.
+Both keys now accept:
+- raw base64 / data URL string, or
+- Google Drive file ID (for example: `117aKNPo3pbe7521CFsBxks3YPbZOzXv4`), or
+- Google Drive share URL.
 
 To get base64:
 ```
