@@ -170,7 +170,11 @@ def render() -> None:
     sales_df["Total_Amount"] = utils.to_numeric_series(
         sales_df.get("Total_Amount", pd.Series(dtype=float))
     ).fillna(0.0)
-    sales_df["Invoice_Key"] = sales_df["Invoice_No"].astype(str).str.strip()
+    updated_invoice = (
+        sales_df.get("Updated_Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
+    )
+    invoice_no = sales_df["Invoice_No"].astype(str).str.strip()
+    sales_df["Invoice_Key"] = updated_invoice.where(updated_invoice != "", invoice_no)
     sales_df.loc[sales_df["Invoice_Key"] == "", "Invoice_Key"] = sales_df["Sales_ID"].astype(str)
     sales_expected = sales_df[sales_df["Invoice_Key"].astype(str).str.strip() != ""].copy()
 
@@ -475,7 +479,7 @@ def render() -> None:
     st.markdown(
         "\n".join(
             [
-                "- Use consistent invoice numbers (e.g., `INV-2026-0001`) in both sales logs and bank narration.",
+                "- Use consistent invoice numbers (e.g., `FY26/0001`) in both sales logs and bank narration.",
                 "- Include invoice number + customer/supplier code in bank narration for all transfers.",
                 "- Record every receipt in the Payments tab on the same day it hits the bank.",
                 "- Avoid entering lump-sum payments without invoice references; split by invoice if possible.",

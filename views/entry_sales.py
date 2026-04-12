@@ -46,12 +46,28 @@ SALES_COLUMNS = [
     "Payment_ID",
     "Dues",
     "Invoice_No",
+    "Updated_Invoice_No",
 ]
 
 SHOW_SALES_RECORDS = False
 SHOW_VALIDATION = False
 GST_RATE = 12.0
 GST_FACTOR = 1 + (GST_RATE / 100)
+ROUND_UP_COLUMNS = [
+    "Sale_rate",
+    "Sale rate",
+    "Sale_Rate",
+    "Rate",
+    "GST",
+    "Gst (%12)",
+    "GST(%12)",
+    "Amount",
+    "Freight_rate",
+    "Freight rate",
+    "Freight_Rate",
+    "Freight",
+    "Total_Amount",
+]
 
 
 def _pick_value(row: pd.Series, keys: list[str]) -> object:
@@ -166,32 +182,13 @@ def _parse_date(value: object) -> date | None:
     return parsed.date()
 
 
-def _invoice_suffix(sales_id: str) -> str | None:
-    digits = re.sub(r"\D", "", sales_id)
-    if len(digits) >= 4:
-        return digits[-4:]
-    return None
-
-
 def _generate_invoice_no(
     sale_date: date,
     sales_id: str,
     existing_invoices: list[str],
 ) -> str:
-    date_part = sale_date.strftime("%d%m%Y")
-    suffix = _invoice_suffix(sales_id)
-    existing = {str(value).strip() for value in existing_invoices if value}
-    if not suffix:
-        suffix = f"{pd.Timestamp.utcnow().microsecond % 10000:04d}"
-    invoice = f"INV-{date_part}-{suffix}"
-    if invoice not in existing:
-        return invoice
-    for _ in range(20):
-        suffix = f"{pd.Timestamp.utcnow().microsecond % 10000:04d}"
-        invoice = f"INV-{date_part}-{suffix}"
-        if invoice not in existing:
-            return invoice
-    return invoice
+    del sales_id
+    return utils.generate_gst_invoice_no(sale_date, existing_invoices)
 
 
 def _sort_sales_log() -> None:
@@ -204,6 +201,97 @@ def _sort_sales_log() -> None:
     ).sort_values(["_sort_date", "Sales_ID"], na_position="last")
     sorted_df = sorted_df.drop(columns=["_sort_date"])
     database.replace_table("Sales_Log", sorted_df, recompute_stock=False)
+
+
+def _round_up_sales_values(sales_df: pd.DataFrame) -> pd.DataFrame:
+    sales_df = sales_df.copy()
+    for column in ROUND_UP_COLUMNS:
+        if column not in sales_df.columns:
+            continue
+        source = sales_df[column]
+        parsed = utils.to_numeric_series(source)
+        has_value = source.astype(str).str.strip() != ""
+        rounded = parsed.apply(lambda value: utils.round_up_2(value) if pd.notna(value) else value)
+        sales_df.loc[has_value, column] = rounded.loc[has_value]
+    return sales_df
+
+
+def _updated_invoice_series(sales_df: pd.DataFrame) -> pd.Series:
+    updated = pd.Series("", index=sales_df.index, dtype=object)
+    if sales_df.empty or "Date" not in sales_df.columns:
+        return updated
+    month_hint = sales_df["Month"] if "Month" in sales_df.columns else None
+    parsed_dates = utils.parse_date_series(sales_df["Date"], month_hint=month_hint)
+    sort_df = pd.DataFrame(
+        {
+            "_sort_date": parsed_dates,
+            "_sort_id": sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+        },
+        index=sales_df.index,
+    ).sort_values(["_sort_date", "_sort_id"], na_position="last")
+    sequence_by_fy: dict[int, int] = {}
+    for idx in sort_df.index:
+        sort_date = sort_df.at[idx, "_sort_date"]
+        if pd.isna(sort_date):
+            continue
+        sale_date = pd.Timestamp(sort_date).date()
+        fy_start = utils.financial_year_start_year(sale_date)
+        sequence_by_fy[fy_start] = sequence_by_fy.get(fy_start, 0) + 1
+        updated.at[idx] = utils.format_gst_invoice_no(sale_date, sequence_by_fy[fy_start])
+    return updated
+
+
+def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -> pd.DataFrame:
+    sales_df = sales_df.copy()
+    for column in SALES_COLUMNS:
+        if column not in sales_df.columns:
+            sales_df[column] = ""
+    sales_df = _round_up_sales_values(sales_df)
+    customer_map = (
+        customers_df.set_index("Customer_ID")
+        .get("Name", pd.Series(dtype=str))
+        .astype(str)
+        .str.strip()
+        .to_dict()
+        if not customers_df.empty and "Customer_ID" in customers_df.columns
+        else {}
+    )
+    sales_df["Customer_ID"] = sales_df["Customer_ID"].astype(str).str.strip()
+    sales_df["Customer_Name"] = sales_df["Customer_ID"].map(
+        lambda customer_id: customer_map.get(customer_id, "")
+    )
+    sales_df["Updated_Invoice_No"] = _updated_invoice_series(sales_df)
+    return sales_df
+
+
+def _sync_sales_log_rules(customers_df: pd.DataFrame) -> None:
+    sales_df = database.read_table("Sales_Log")
+    if sales_df.empty:
+        return
+    updated_df = _apply_sales_log_rules(sales_df, customers_df)
+    current_df = utils.ensure_columns(sales_df, updated_df.columns.tolist())
+    compare_columns = updated_df.columns.tolist()
+    has_changes = False
+    for column in compare_columns:
+        current_col = current_df[column] if column in current_df.columns else pd.Series("", index=updated_df.index)
+        updated_col = updated_df[column]
+        if column in ROUND_UP_COLUMNS:
+            current_num = pd.to_numeric(current_col, errors="coerce")
+            updated_num = pd.to_numeric(updated_col, errors="coerce")
+            current_cmp = current_num.apply(
+                lambda value: "" if pd.isna(value) else f"{float(value):.2f}"
+            )
+            updated_cmp = updated_num.apply(
+                lambda value: "" if pd.isna(value) else f"{float(value):.2f}"
+            )
+        else:
+            current_cmp = current_col.fillna("").astype(str).str.strip()
+            updated_cmp = updated_col.fillna("").astype(str).str.strip()
+        if not current_cmp.equals(updated_cmp):
+            has_changes = True
+            break
+    if has_changes:
+        database.replace_table("Sales_Log", updated_df, recompute_stock=False)
 
 
 def _payment_applied_amount(row: pd.Series) -> float:
@@ -574,6 +662,7 @@ def render() -> None:
         st.info("Customer IDs are missing. Update Master Data.")
         return
 
+    _sync_sales_log_rules(customers)
     entries = database.read_table("Sales_Log")
     due_label = _sales_due_label(entries)
 
@@ -627,7 +716,7 @@ def render() -> None:
                 index=0,
             )
             payment_date = st.date_input("Payment Date", value=sale_date)
-            invoice_no = st.text_input("Invoice No (optional)")
+            invoice_no = st.text_input("Invoice No (optional, next GST sequence only)")
 
         rate, gst_amount, amount, freight, total_amount = _sales_values_from_rates(
             no_of_bricks,
@@ -671,68 +760,92 @@ def render() -> None:
             )
             sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
             fiscal_label = _fy_label_short(sale_date)
-            due_amount = total_amount - amount_received
+            due_amount = utils.round_up_2(total_amount - amount_received)
             existing_invoices = (
                 entries.get("Invoice_No", pd.Series(dtype=str))
                 .astype(str)
                 .str.strip()
                 .tolist()
             )
-            invoice_no_final = (
-                str(invoice_no).strip()
-                or _generate_invoice_no(sale_date, sales_id, existing_invoices)
+            next_invoice_no = _generate_invoice_no(sale_date, sales_id, existing_invoices)
+            manual_invoice_no = str(invoice_no).strip().upper()
+            if manual_invoice_no:
+                if not utils.is_valid_invoice_identifier(manual_invoice_no):
+                    errors.append(
+                        "Invoice No must be <=16 chars and use only letters, numbers, '-' or '/'."
+                    )
+                elif manual_invoice_no != next_invoice_no:
+                    errors.append(
+                        f"Invoice No must follow GST sequence. Expected next invoice: {next_invoice_no}"
+                    )
+            invoice_no_final = manual_invoice_no or next_invoice_no
+            customer_name_value = (
+                customers.loc[customers["Customer_ID"] == customer_id]
+                .get("Name", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .iloc[0]
+                if not customers.loc[customers["Customer_ID"] == customer_id].empty
+                else ""
             )
-            data = {
-                "Sales_ID": sales_id,
-                "Date": sale_date.isoformat(),
-                "Fiscal": fiscal_label,
-                "Fiscal Year": fiscal_label,
-                "Fiscal_Year": fiscal_label,
-                "Year": sale_date.strftime("%Y"),
-                "Month": utils.to_month_string(sale_date),
-                "Customer_ID": customer_id,
-                "Destination": destination,
-                "No_of_Bricks": no_of_bricks,
-                "Sale_rate": sale_rate,
-                "Sale rate": sale_rate,
-                "Sale_Rate": sale_rate,
-                "Rate": rate,
-                "GST": gst_amount,
-                "Gst (%12)": gst_amount,
-                "GST(%12)": gst_amount,
-                "Amount": amount,
-                "Freight_rate": freight_rate,
-                "Freight rate": freight_rate,
-                "Freight_Rate": freight_rate,
-                "Freight": freight,
-                "Transport_Party": transport_party,
-                "Total_Amount": total_amount,
-                "Freight_Paid": freight_paid,
-                "Freight_Paid_By": freight_paid_by,
-                "Amount_Received": amount_received,
-                "Payment_Mode": payment_mode,
-                "Payment_Date": payment_date.isoformat(),
-                "Payment_ID": "",
-                "Dues": total_amount - amount_received,
-                "Invoice_No": invoice_no_final,
-            }
-            data = {key: data.get(key, "") for key in SALES_COLUMNS}
-            database.insert_row("Sales_Log", data)
-            _sort_sales_log()
+            if errors:
+                for error in errors:
+                    st.error(error)
+            else:
+                data = {
+                    "Sales_ID": sales_id,
+                    "Date": sale_date.isoformat(),
+                    "Fiscal": fiscal_label,
+                    "Fiscal Year": fiscal_label,
+                    "Fiscal_Year": fiscal_label,
+                    "Year": sale_date.strftime("%Y"),
+                    "Month": utils.to_month_string(sale_date),
+                    "Customer_ID": customer_id,
+                    "Customer_Name": customer_name_value,
+                    "Destination": destination,
+                    "No_of_Bricks": no_of_bricks,
+                    "Sale_rate": utils.round_up_2(sale_rate),
+                    "Sale rate": utils.round_up_2(sale_rate),
+                    "Sale_Rate": utils.round_up_2(sale_rate),
+                    "Rate": utils.round_up_2(rate),
+                    "GST": utils.round_up_2(gst_amount),
+                    "Gst (%12)": utils.round_up_2(gst_amount),
+                    "GST(%12)": utils.round_up_2(gst_amount),
+                    "Amount": utils.round_up_2(amount),
+                    "Freight_rate": utils.round_up_2(freight_rate),
+                    "Freight rate": utils.round_up_2(freight_rate),
+                    "Freight_Rate": utils.round_up_2(freight_rate),
+                    "Freight": utils.round_up_2(freight),
+                    "Transport_Party": transport_party,
+                    "Total_Amount": utils.round_up_2(total_amount),
+                    "Freight_Paid": freight_paid,
+                    "Freight_Paid_By": freight_paid_by,
+                    "Amount_Received": utils.round_up_2(amount_received),
+                    "Payment_Mode": payment_mode,
+                    "Payment_Date": payment_date.isoformat(),
+                    "Payment_ID": "",
+                    "Dues": utils.round_up_2(total_amount - amount_received),
+                    "Invoice_No": invoice_no_final,
+                    "Updated_Invoice_No": invoice_no_final,
+                }
+                data = {key: data.get(key, "") for key in SALES_COLUMNS}
+                database.insert_row("Sales_Log", data)
+                _sort_sales_log()
+                _sync_sales_log_rules(customers)
 
-            outstanding = 0.0
-            customer_row = customers.loc[customers["Customer_ID"] == customer_id]
-            if not customer_row.empty:
-                outstanding = utils.safe_float(
-                    customer_row.iloc[0].get("Outstanding_Balance", 0)
+                outstanding = 0.0
+                customer_row = customers.loc[customers["Customer_ID"] == customer_id]
+                if not customer_row.empty:
+                    outstanding = utils.safe_float(
+                        customer_row.iloc[0].get("Outstanding_Balance", 0)
+                    )
+
+                database.update_row(
+                    "Customers",
+                    customer_id,
+                    {"Outstanding_Balance": outstanding + due_amount},
                 )
-
-            database.update_row(
-                "Customers",
-                customer_id,
-                {"Outstanding_Balance": outstanding + due_amount},
-            )
-            st.success("Sales entry saved and outstanding updated.")
+                st.success("Sales entry saved and outstanding updated.")
 
     entries = database.read_table("Sales_Log")
     has_entries = not entries.empty and "Sales_ID" in entries.columns
@@ -841,7 +954,9 @@ def render() -> None:
         invoice_labels = []
         for _, row in entries.iterrows():
             sales_id = str(row.get("Sales_ID", "")).strip()
-            invoice_no = str(row.get("Invoice_No", "")).strip()
+            invoice_no = str(
+                row.get("Updated_Invoice_No", row.get("Invoice_No", ""))
+            ).strip() or str(row.get("Invoice_No", "")).strip()
             customer_id = str(row.get("Customer_ID", "")).strip()
             sale_date = str(row.get("Date", "")).strip()
             label = f"{invoice_no or sales_id} | {customer_id} | {sale_date}"
@@ -1061,8 +1176,14 @@ def render() -> None:
                         encoded_name = quote(company_name) if company_name else "Payee"
                         qr_data = f"upi://pay?pa={upi_id}&pn={encoded_name}"
 
+                    selected_row_pdf = selected_row.copy()
+                    invoice_display_no = str(
+                        selected_row.get("Updated_Invoice_No", "")
+                    ).strip() or str(selected_row.get("Invoice_No", "")).strip()
+                    if invoice_display_no:
+                        selected_row_pdf["Invoice_No"] = invoice_display_no
                     pdf_bytes = utils.generate_invoice_pdf(
-                        selected_row,
+                        selected_row_pdf,
                         customer_row,
                         {
                             "name": company_name,
@@ -1339,6 +1460,12 @@ def render() -> None:
                     if not customers_df.empty and "Customer_ID" in customers_df.columns
                     else pd.Series(dtype=float)
                 ).to_dict()
+                existing_invoices_all = (
+                    entries.get("Invoice_No", pd.Series(dtype=str))
+                    .astype(str)
+                    .str.strip()
+                    .tolist()
+                )
                 for _, row in edited_invalid.iterrows():
                     row = row.where(pd.notnull(row), "")
                     row_id = str(row.get("Sales_ID", "")).strip()
@@ -1373,17 +1500,17 @@ def render() -> None:
                             freight=freight_new,
                         )
                     )
-                    due_new = total_new - received_new
+                    due_new = utils.round_up_2(total_new - received_new)
 
                     data = row.to_dict()
-                    data["Rate"] = rate_calc
-                    data["Amount"] = amount_new
-                    data["GST"] = gst_new
-                    data["Gst (%12)"] = gst_new
-                    data["GST(%12)"] = gst_new
-                    data["Freight"] = freight_total
-                    data["Total_Amount"] = total_new
-                    data["Dues"] = total_new - received_new
+                    data["Rate"] = utils.round_up_2(rate_calc)
+                    data["Amount"] = utils.round_up_2(amount_new)
+                    data["GST"] = utils.round_up_2(gst_new)
+                    data["Gst (%12)"] = utils.round_up_2(gst_new)
+                    data["GST(%12)"] = utils.round_up_2(gst_new)
+                    data["Freight"] = utils.round_up_2(freight_total)
+                    data["Total_Amount"] = utils.round_up_2(total_new)
+                    data["Dues"] = utils.round_up_2(total_new - received_new)
                     entry_date = _parse_date(row.get("Date", ""))
                     if entry_date:
                         fiscal_label = _fy_label_short(entry_date)
@@ -1394,17 +1521,14 @@ def render() -> None:
                         data["Fiscal_Year"] = fiscal_label
                     invoice_current = str(row.get("Invoice_No", "")).strip()
                     if not invoice_current:
-                        existing_invoices = (
-                            entries.get("Invoice_No", pd.Series(dtype=str))
-                            .astype(str)
-                            .str.strip()
-                            .tolist()
-                        )
-                        data["Invoice_No"] = _generate_invoice_no(
+                        generated_invoice = _generate_invoice_no(
                             entry_date or date.today(),
                             row_id,
-                            existing_invoices,
+                            existing_invoices_all,
                         )
+                        data["Invoice_No"] = generated_invoice
+                        existing_invoices_all.append(generated_invoice)
+                    data["Updated_Invoice_No"] = data.get("Invoice_No", "")
 
                     database.update_row("Sales_Log", row_id, data)
 
@@ -1440,6 +1564,7 @@ def render() -> None:
                             )
 
                 _sort_sales_log()
+                _sync_sales_log_rules(customers)
                 st.success("Corrections saved.")
                 st.rerun()
         else:
