@@ -212,7 +212,11 @@ def _round_up_sales_values(sales_df: pd.DataFrame) -> pd.DataFrame:
         parsed = utils.to_numeric_series(source)
         has_value = source.astype(str).str.strip() != ""
         rounded = parsed.apply(lambda value: utils.round_up_2(value) if pd.notna(value) else value)
-        sales_df.loc[has_value, column] = rounded.loc[has_value]
+        # Arrow-backed string columns can fail on masked numeric assignment.
+        # Build the updated column as object and assign it back in one shot.
+        updated_column = source.astype(object).copy()
+        updated_column.loc[has_value] = rounded.loc[has_value]
+        sales_df[column] = updated_column
     return sales_df
 
 
