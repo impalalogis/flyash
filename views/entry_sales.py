@@ -345,25 +345,39 @@ def _payment_applied_amount(row: pd.Series) -> float:
 def _sale_description(row: pd.Series) -> str:
     destination = str(row.get("Destination", "")).strip()
     bricks = utils.safe_float(row.get("No_of_Bricks", 0.0))
-    rate = utils.safe_float(row.get("Rate", 0.0))
+    amount = utils.safe_float(row.get("Amount", 0.0))
+    freight = utils.safe_float(row.get("Freight", 0.0))
+    adjusted_rate = utils.safe_float(row.get("Adjusted_Rate", 0.0))
+    if adjusted_rate <= 0 and bricks > 0:
+        adjusted_rate = (amount + freight) / bricks
+    adjusted_amount = utils.safe_float(row.get("Adjusted_Amount", 0.0))
+    if adjusted_amount <= 0:
+        adjusted_amount = amount + freight
     gst = utils.safe_float(
         row.get("GST(%12)", row.get("Gst (%12)", row.get("GST", 0.0)))
     )
-    amount = utils.safe_float(row.get("Amount", 0.0))
-    freight = utils.safe_float(row.get("Freight", 0.0))
-    total = utils.safe_float(row.get("Total_Amount", 0.0))
+    total = utils.safe_float(
+        row.get("Adjusted_Total_amount", row.get("Total_Amount", 0.0))
+    )
     breakdown = (
-        f"Bricks {bricks:,.0f}, Rate {rate:,.2f}, GST {gst:,.2f}, "
-        f"Amount {amount:,.2f}, Freight {freight:,.2f}, Total {total:,.2f}"
+        f"Fly-ash bricks | Qty {bricks:,.0f}, Rate {adjusted_rate:,.2f}, "
+        f"Amount {adjusted_amount:,.2f}, GST {gst:,.2f}, Total {total:,.2f}"
     )
     if destination:
         return f"Sale to {destination} | {breakdown}"
     return f"Sale invoice | {breakdown}"
 
 
-def _payment_description(row: pd.Series) -> str:
+def _payment_description(row: pd.Series, invoice_map: dict[str, str] | None = None) -> str:
+    invoice_map = invoice_map or {}
     mode = str(row.get("Mode", "")).strip()
-    invoice_ref = str(row.get("Invoice_No", "")).strip()
+    raw_invoice_ref = str(row.get("Invoice_No", "")).strip()
+    if raw_invoice_ref:
+        invoice_parts = [part.strip() for part in raw_invoice_ref.split(",") if part.strip()]
+        mapped_parts = [invoice_map.get(part, part) for part in invoice_parts]
+        invoice_ref = ", ".join(mapped_parts)
+    else:
+        invoice_ref = ""
     if invoice_ref and mode:
         return f"Payment ({mode}) for {invoice_ref}"
     if mode:
@@ -393,8 +407,12 @@ def _build_customer_ledger(
             "GST",
             "Gst (%12)",
             "GST(%12)",
+            "Adjusted_Rate",
+            "Adjusted_Amount",
             "Total_Amount",
+            "Adjusted_Total_amount",
             "Invoice_No",
+            "Updated_Invoice_No",
         ],
     ).copy()
     payments_df = utils.ensure_columns(
@@ -430,6 +448,9 @@ def _build_customer_ledger(
     sales_df["Total_Amount"] = utils.to_numeric_series(
         sales_df.get("Total_Amount", pd.Series(dtype=float))
     ).fillna(0.0)
+    sales_df["Adjusted_Total_amount"] = utils.to_numeric_series(
+        sales_df.get("Adjusted_Total_amount", pd.Series(dtype=float))
+    ).fillna(0.0)
     payments_df["Amount_Paid"] = utils.to_numeric_series(
         payments_df.get("Amount_Paid", pd.Series(dtype=float))
     ).fillna(0.0)
@@ -444,20 +465,41 @@ def _build_customer_ledger(
     payment_dates = utils.parse_date_series(
         payments_df.get("Date", pd.Series(dtype=str)),
     )
+    invoice_map: dict[str, str] = {}
+    for _, sale_row in sales_df.iterrows():
+        original = str(sale_row.get("Invoice_No", "")).strip()
+        updated = str(sale_row.get("Updated_Invoice_No", "")).strip()
+        canonical = updated or original
+        if not canonical:
+            continue
+        if original:
+            invoice_map[original] = canonical
+        invoice_map[canonical] = canonical
 
     sales_events = pd.DataFrame(
         {
             "Date": sales_dates.dt.date,
             "Type": "Sale",
-            "Reference": sales_df.get("Invoice_No", pd.Series(dtype=str))
+            "Reference": sales_df.get("Updated_Invoice_No", pd.Series(dtype=str))
             .astype(str)
             .str.strip()
             .where(
-                sales_df.get("Invoice_No", pd.Series(dtype=str)).astype(str).str.strip() != "",
-                sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+                sales_df.get("Updated_Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
+                != "",
+                sales_df.get("Invoice_No", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+                .where(
+                    sales_df.get("Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
+                    != "",
+                    sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+                ),
             ),
             "Description": sales_df.apply(_sale_description, axis=1),
-            "Debit": sales_df["Total_Amount"],
+            "Debit": sales_df["Adjusted_Total_amount"].where(
+                sales_df["Adjusted_Total_amount"] > 0,
+                sales_df["Total_Amount"],
+            ),
             "Credit": 0.0,
             "_applied": 0.0,
         }
@@ -470,7 +512,10 @@ def _build_customer_ledger(
             "Date": payment_dates.dt.date,
             "Type": "Payment",
             "Reference": payment_refs,
-            "Description": payments_df.apply(_payment_description, axis=1),
+            "Description": payments_df.apply(
+                lambda payment_row: _payment_description(payment_row, invoice_map),
+                axis=1,
+            ),
             "Debit": 0.0,
             "Credit": payments_df["Amount_Paid"],
             "_applied": applied_amounts,
@@ -511,7 +556,18 @@ def _ledger_events(
             "Customer_ID",
             "Destination",
             "Total_Amount",
+            "Adjusted_Total_amount",
             "Invoice_No",
+            "Updated_Invoice_No",
+            "No_of_Bricks",
+            "Rate",
+            "Adjusted_Rate",
+            "Amount",
+            "Adjusted_Amount",
+            "Freight",
+            "GST",
+            "Gst (%12)",
+            "GST(%12)",
         ],
     ).copy()
     payments_df = utils.ensure_columns(
@@ -536,6 +592,9 @@ def _ledger_events(
     sales_df["Total_Amount"] = utils.to_numeric_series(
         sales_df.get("Total_Amount", pd.Series(dtype=float))
     ).fillna(0.0)
+    sales_df["Adjusted_Total_amount"] = utils.to_numeric_series(
+        sales_df.get("Adjusted_Total_amount", pd.Series(dtype=float))
+    ).fillna(0.0)
     payments_df["Amount_Paid"] = utils.to_numeric_series(
         payments_df.get("Amount_Paid", pd.Series(dtype=float))
     ).fillna(0.0)
@@ -548,21 +607,35 @@ def _ledger_events(
         payments_df.get("Date", pd.Series(dtype=str))
     ).dt.date
 
+    invoice_map: dict[str, str] = {}
+    for _, sale_row in sales_df.iterrows():
+        original = str(sale_row.get("Invoice_No", "")).strip()
+        updated = str(sale_row.get("Updated_Invoice_No", "")).strip()
+        canonical = updated or original
+        if not canonical:
+            continue
+        if original:
+            invoice_map[original] = canonical
+        invoice_map[canonical] = canonical
+
     events: list[dict[str, object]] = []
     for idx, row in sales_df.iterrows():
-        invoice_no = str(row.get("Invoice_No", "")).strip()
+        invoice_no = str(row.get("Updated_Invoice_No", "")).strip() or str(
+            row.get("Invoice_No", "")
+        ).strip()
         reference = invoice_no or str(row.get("Sales_ID", "")).strip()
-        destination = str(row.get("Destination", "")).strip()
-        description = "Sale"
-        if destination:
-            description = f"Sale - {destination}"
+        description = _sale_description(row)
         events.append(
             {
                 "Date": sales_dates.loc[idx],
                 "Type": "Sale",
                 "Reference": reference,
                 "Description": description,
-                "Debit": float(row.get("Total_Amount", 0.0)),
+                "Debit": float(
+                    row.get("Adjusted_Total_amount", 0.0)
+                    if utils.safe_float(row.get("Adjusted_Total_amount", 0.0)) > 0
+                    else row.get("Total_Amount", 0.0)
+                ),
                 "Credit": 0.0,
                 "Applied": 0.0,
                 "_order": 0,
@@ -571,7 +644,13 @@ def _ledger_events(
 
     for idx, row in payments_df.iterrows():
         payment_id = str(row.get("Payment_ID", "")).strip()
-        invoice_ref = str(row.get("Invoice_No", "")).strip()
+        raw_invoice_ref = str(row.get("Invoice_No", "")).strip()
+        if raw_invoice_ref:
+            invoice_parts = [part.strip() for part in raw_invoice_ref.split(",") if part.strip()]
+            mapped_parts = [invoice_map.get(part, part) for part in invoice_parts]
+            invoice_ref = ", ".join(mapped_parts)
+        else:
+            invoice_ref = ""
         mode = str(row.get("Mode", "")).strip()
         description_parts = ["Payment received"]
         if mode:
