@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import math
 import re
 from typing import Iterable
 import base64
@@ -20,10 +21,16 @@ GST_INVOICE_ALLOWED_PATTERN = re.compile(r"^[A-Za-z0-9/-]+$")
 
 def safe_float(value: object, default: float = 0.0) -> float:
     try:
-        if value is None or value == "":
+        if value is None:
             return default
-        numeric = float(value)
-        if pd.isna(numeric):
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").strip()
+            if cleaned == "":
+                return default
+            numeric = float(cleaned)
+        else:
+            numeric = float(value)
+        if pd.isna(numeric) or not math.isfinite(numeric):
             return default
         return numeric
     except (TypeError, ValueError):
@@ -755,7 +762,10 @@ def generate_invoice_pdf(
     if adjusted_amount <= 0:
         adjusted_amount = adjusted_rate * qty
     gst_amount = safe_float(
-        sale_row.get("GST", sale_row.get("Gst (%12)", sale_row.get("GST(%12)", 0)))
+        sale_row.get(
+            "GST(%12)",
+            sale_row.get("Gst (%12)", sale_row.get("GST", 0)),
+        )
     )
     adjusted_total = safe_float(sale_row.get("Adjusted_Total_amount", 0))
     total = (
