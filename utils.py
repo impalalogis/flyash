@@ -22,7 +22,10 @@ def safe_float(value: object, default: float = 0.0) -> float:
     try:
         if value is None or value == "":
             return default
-        return float(value)
+        numeric = float(value)
+        if pd.isna(numeric):
+            return default
+        return numeric
     except (TypeError, ValueError):
         return default
 
@@ -50,8 +53,9 @@ def financial_year_start_year(value: date) -> int:
 
 
 def financial_year_code(value: date) -> str:
+    start_year = financial_year_start_year(value) % 100
     end_year = (financial_year_start_year(value) + 1) % 100
-    return f"FY{end_year:02d}"
+    return f"FY{start_year:02d}{end_year:02d}"
 
 
 def is_valid_invoice_identifier(value: object) -> bool:
@@ -66,13 +70,20 @@ def is_valid_invoice_identifier(value: object) -> bool:
 def _invoice_sequence_for_fy(invoice: object, sale_date: date) -> int | None:
     invoice_value = str(invoice or "").strip().upper()
     fy_code = financial_year_code(sale_date)
-    match = re.fullmatch(rf"{re.escape(fy_code)}/(\d+)", invoice_value)
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
+    legacy_fy_code = f"FY{((financial_year_start_year(sale_date) + 1) % 100):02d}"
+    patterns = [
+        rf"{re.escape(fy_code)}/(\d+)",
+        rf"{re.escape(legacy_fy_code)}/(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.fullmatch(pattern, invoice_value)
+        if not match:
+            continue
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    return None
 
 
 def format_gst_invoice_no(sale_date: date, sequence: int) -> str:

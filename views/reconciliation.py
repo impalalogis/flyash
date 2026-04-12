@@ -479,7 +479,7 @@ def render() -> None:
     st.markdown(
         "\n".join(
             [
-                "- Use consistent invoice numbers (e.g., `FY26/0001`) in both sales logs and bank narration.",
+                "- Use consistent invoice numbers (e.g., `FY2627/0001`) in both sales logs and bank narration.",
                 "- Include invoice number + customer/supplier code in bank narration for all transfers.",
                 "- Record every receipt in the Payments tab on the same day it hits the bank.",
                 "- Avoid entering lump-sum payments without invoice references; split by invoice if possible.",
