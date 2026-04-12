@@ -31,6 +31,8 @@ SALES_COLUMNS = [
     "GST",
     "Gst (%12)",
     "GST(%12)",
+    "Adjusted_Rate",
+    "Adjusted_Amount",
     "Amount",
     "Freight_rate",
     "Freight rate",
@@ -38,6 +40,7 @@ SALES_COLUMNS = [
     "Freight",
     "Transport_Party",
     "Total_Amount",
+    "Adjusted_Total_amount",
     "Freight_Paid",
     "Freight_Paid_By",
     "Amount_Received",
@@ -61,12 +64,15 @@ ROUND_UP_COLUMNS = [
     "GST",
     "Gst (%12)",
     "GST(%12)",
+    "Adjusted_Rate",
+    "Adjusted_Amount",
     "Amount",
     "Freight_rate",
     "Freight rate",
     "Freight_Rate",
     "Freight",
     "Total_Amount",
+    "Adjusted_Total_amount",
 ]
 
 
@@ -220,6 +226,35 @@ def _round_up_sales_values(sales_df: pd.DataFrame) -> pd.DataFrame:
     return sales_df
 
 
+def _apply_adjusted_columns(sales_df: pd.DataFrame) -> pd.DataFrame:
+    sales_df = sales_df.copy()
+    for column in ["Adjusted_Rate", "Adjusted_Amount", "Adjusted_Total_amount"]:
+        if column not in sales_df.columns:
+            sales_df[column] = ""
+
+    empty = pd.Series("", index=sales_df.index, dtype=object)
+    bricks = utils.to_numeric_series(sales_df.get("No_of_Bricks", empty)).fillna(0.0)
+    amount = utils.to_numeric_series(sales_df.get("Amount", empty)).fillna(0.0)
+    freight = utils.to_numeric_series(sales_df.get("Freight", empty)).fillna(0.0)
+    gst_source = sales_df.get("GST(%12)")
+    if gst_source is None:
+        gst_source = sales_df.get("Gst (%12)")
+    if gst_source is None:
+        gst_source = sales_df.get("GST", empty)
+    gst = utils.to_numeric_series(gst_source).fillna(0.0)
+
+    adjusted_rate = pd.Series(0.0, index=sales_df.index, dtype=float)
+    valid_bricks = bricks > 0
+    adjusted_rate.loc[valid_bricks] = (amount.loc[valid_bricks] + freight.loc[valid_bricks]) / bricks.loc[valid_bricks]
+    adjusted_amount = adjusted_rate * bricks
+    adjusted_total = adjusted_amount + gst
+
+    sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_up_2)
+    sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_up_2)
+    sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_up_2)
+    return sales_df
+
+
 def _updated_invoice_series(sales_df: pd.DataFrame) -> pd.Series:
     updated = pd.Series("", index=sales_df.index, dtype=object)
     if sales_df.empty or "Date" not in sales_df.columns:
@@ -251,6 +286,7 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
         if column not in sales_df.columns:
             sales_df[column] = ""
     sales_df = _round_up_sales_values(sales_df)
+    sales_df = _apply_adjusted_columns(sales_df)
     customer_map = (
         customers_df.set_index("Customer_ID")
         .get("Name", pd.Series(dtype=str))
@@ -815,6 +851,10 @@ def render() -> None:
                     "GST": utils.round_up_2(gst_amount),
                     "Gst (%12)": utils.round_up_2(gst_amount),
                     "GST(%12)": utils.round_up_2(gst_amount),
+                    "Adjusted_Rate": utils.round_up_2(
+                        (amount + freight) / no_of_bricks if no_of_bricks > 0 else 0.0
+                    ),
+                    "Adjusted_Amount": utils.round_up_2(amount + freight),
                     "Amount": utils.round_up_2(amount),
                     "Freight_rate": utils.round_up_2(freight_rate),
                     "Freight rate": utils.round_up_2(freight_rate),
@@ -822,6 +862,7 @@ def render() -> None:
                     "Freight": utils.round_up_2(freight),
                     "Transport_Party": transport_party,
                     "Total_Amount": utils.round_up_2(total_amount),
+                    "Adjusted_Total_amount": utils.round_up_2(total_amount),
                     "Freight_Paid": freight_paid,
                     "Freight_Paid_By": freight_paid_by,
                     "Amount_Received": utils.round_up_2(amount_received),
@@ -868,12 +909,15 @@ def render() -> None:
             "GST",
             "Gst (%12)",
             "GST(%12)",
+            "Adjusted_Rate",
+            "Adjusted_Amount",
             "Amount",
             "Freight_rate",
             "Freight rate",
             "Freight_Rate",
             "Freight",
             "Total_Amount",
+            "Adjusted_Total_amount",
             "Amount_Received",
             "Dues",
         ]
@@ -1512,8 +1556,13 @@ def render() -> None:
                     data["GST"] = utils.round_up_2(gst_new)
                     data["Gst (%12)"] = utils.round_up_2(gst_new)
                     data["GST(%12)"] = utils.round_up_2(gst_new)
+                    data["Adjusted_Rate"] = utils.round_up_2(
+                        (amount_new + freight_total) / bricks_val if bricks_val > 0 else 0.0
+                    )
+                    data["Adjusted_Amount"] = utils.round_up_2(amount_new + freight_total)
                     data["Freight"] = utils.round_up_2(freight_total)
                     data["Total_Amount"] = utils.round_up_2(total_new)
+                    data["Adjusted_Total_amount"] = utils.round_up_2(total_new)
                     data["Dues"] = utils.round_up_2(total_new - received_new)
                     entry_date = _parse_date(row.get("Date", ""))
                     if entry_date:

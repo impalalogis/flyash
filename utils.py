@@ -735,43 +735,50 @@ def generate_invoice_pdf(
     pdf.drawRightString(190 * mm, table_y, "Amount")
 
     qty = safe_float(sale_row.get("No_of_Bricks", 0))
-    rate = safe_float(sale_row.get("Rate", 0))
-    amount = safe_float(sale_row.get("Amount", qty * rate))
+    raw_amount = safe_float(sale_row.get("Amount", 0))
+    raw_freight = safe_float(sale_row.get("Freight", 0))
+    adjusted_rate = safe_float(sale_row.get("Adjusted_Rate", 0))
+    if adjusted_rate <= 0 and qty > 0:
+        adjusted_rate = (raw_amount + raw_freight) / qty
+    adjusted_amount = safe_float(sale_row.get("Adjusted_Amount", 0))
+    if adjusted_amount <= 0:
+        adjusted_amount = adjusted_rate * qty
     gst_amount = safe_float(
         sale_row.get("GST", sale_row.get("Gst (%12)", sale_row.get("GST(%12)", 0)))
     )
-    freight = safe_float(sale_row.get("Freight", 0))
-    total = safe_float(sale_row.get("Total_Amount", amount + freight))
+    adjusted_total = safe_float(sale_row.get("Adjusted_Total_amount", 0))
+    total = (
+        adjusted_total
+        if adjusted_total > 0
+        else safe_float(sale_row.get("Total_Amount", adjusted_amount + gst_amount))
+    )
     received = safe_float(sale_row.get("Amount_Received", 0))
-    due = safe_float(sale_row.get("Due", total - received))
+    due = safe_float(sale_row.get("Dues", sale_row.get("Due", total - received)))
 
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, table_y - 6 * mm, "Fly-ash bricks")
     pdf.drawRightString(120 * mm, table_y - 6 * mm, f"{qty:,.0f}")
-    pdf.drawRightString(150 * mm, table_y - 6 * mm, f"{rate:,.2f}")
-    pdf.drawRightString(190 * mm, table_y - 6 * mm, f"{amount:,.2f}")
+    pdf.drawRightString(150 * mm, table_y - 6 * mm, f"{adjusted_rate:,.2f}")
+    pdf.drawRightString(190 * mm, table_y - 6 * mm, f"{adjusted_amount:,.2f}")
 
     pdf.drawString(20 * mm, table_y - 12 * mm, "GST (12%)")
     pdf.drawRightString(190 * mm, table_y - 12 * mm, f"{gst_amount:,.2f}")
 
-    pdf.drawString(20 * mm, table_y - 18 * mm, "Freight")
-    pdf.drawRightString(190 * mm, table_y - 18 * mm, f"{freight:,.2f}")
-
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y - 28 * mm, "Total")
-    pdf.drawRightString(190 * mm, table_y - 28 * mm, f"{total:,.2f}")
+    pdf.drawString(20 * mm, table_y - 20 * mm, "Total")
+    pdf.drawRightString(190 * mm, table_y - 20 * mm, f"{total:,.2f}")
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, table_y - 36 * mm, "Amount Received")
-    pdf.drawRightString(190 * mm, table_y - 36 * mm, f"{received:,.2f}")
+    pdf.drawString(20 * mm, table_y - 28 * mm, "Amount Received")
+    pdf.drawRightString(190 * mm, table_y - 28 * mm, f"{received:,.2f}")
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y - 44 * mm, "Balance Due")
-    pdf.drawRightString(190 * mm, table_y - 44 * mm, f"{due:,.2f}")
+    pdf.drawString(20 * mm, table_y - 36 * mm, "Balance Due")
+    pdf.drawRightString(190 * mm, table_y - 36 * mm, f"{due:,.2f}")
 
     footer_y = 18 * mm
     reserved_bottom = footer_y + (40 * mm if (qr_data or payment_details) else 10 * mm)
-    terms_start = table_y - 54 * mm
+    terms_start = table_y - 46 * mm
     if terms:
         pdf.setFont(terms_font_name, 7)
         text = pdf.beginText(20 * mm, terms_start)
