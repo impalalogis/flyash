@@ -5,6 +5,7 @@ import re
 from typing import Iterable
 import base64
 import binascii
+from decimal import Decimal, InvalidOperation, ROUND_UP
 import io
 import os
 import tempfile
@@ -13,6 +14,8 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 import pandas as pd
+
+GST_INVOICE_ALLOWED_PATTERN = re.compile(r"^[A-Za-z0-9/-]+$")
 
 
 def safe_float(value: object, default: float = 0.0) -> float:
@@ -31,6 +34,74 @@ def safe_int(value: object, default: int = 0) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def round_up_2(value: object, default: float = 0.0) -> float:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return default
+    quantized = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_UP)
+    return float(quantized)
+
+
+def financial_year_start_year(value: date) -> int:
+    return value.year if value.month >= 4 else value.year - 1
+
+
+def financial_year_code(value: date) -> str:
+    end_year = (financial_year_start_year(value) + 1) % 100
+    return f"FY{end_year:02d}"
+
+
+def is_valid_invoice_identifier(value: object) -> bool:
+    invoice = str(value or "").strip()
+    if not invoice:
+        return False
+    if len(invoice) > 16:
+        return False
+    return bool(GST_INVOICE_ALLOWED_PATTERN.fullmatch(invoice))
+
+
+def _invoice_sequence_for_fy(invoice: object, sale_date: date) -> int | None:
+    invoice_value = str(invoice or "").strip().upper()
+    fy_code = financial_year_code(sale_date)
+    match = re.fullmatch(rf"{re.escape(fy_code)}/(\d+)", invoice_value)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def format_gst_invoice_no(sale_date: date, sequence: int) -> str:
+    fy_code = financial_year_code(sale_date)
+    digits = f"{int(sequence):04d}"
+    invoice = f"{fy_code}/{digits}"
+    if len(invoice) <= 16:
+        return invoice
+    trimmed_fy = fy_code[: max(1, 15 - len(digits))]
+    return f"{trimmed_fy}/{digits}"[:16]
+
+
+def generate_gst_invoice_no(sale_date: date, existing_invoices: Iterable[object]) -> str:
+    existing = {
+        str(value).strip().upper()
+        for value in existing_invoices
+        if str(value or "").strip()
+    }
+    max_seq = 0
+    for invoice in existing:
+        seq = _invoice_sequence_for_fy(invoice, sale_date)
+        if seq is not None:
+            max_seq = max(max_seq, seq)
+    sequence = max_seq + 1
+    while True:
+        candidate = format_gst_invoice_no(sale_date, sequence)
+        if candidate not in existing:
+            return candidate
+        sequence += 1
 
 
 def to_numeric_series(series: pd.Series) -> pd.Series:
