@@ -831,7 +831,6 @@ def generate_customer_ledger_pdf(
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # Branding
     branding = branding or {}
     brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
 
@@ -888,9 +887,8 @@ def generate_customer_ledger_pdf(
     # CUSTOMER DETAILS + SUMMARY (side-by-side)
     y = height - 55 * mm
 
-    # Left column width
     left_x = 20 * mm
-    right_x = 120 * mm
+    right_x = 108 * mm  # shifted left as requested
 
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(left_x, y, "Customer Details")
@@ -905,12 +903,8 @@ def generate_customer_ledger_pdf(
     customer_address = str(customer_row.get("Address", "")).strip()
 
     # Address formatting (no line break after "Address:")
-    address_lines = textwrap.wrap(
-        f"Address: {customer_address}",
-        width=70
-    )
+    address_lines = textwrap.wrap(f"Address: {customer_address}", width=70)
 
-    # Left column
     left_y = y
     if customer_name:
         pdf.drawString(left_x, left_y, f"Name: {customer_name}")
@@ -922,7 +916,7 @@ def generate_customer_ledger_pdf(
         pdf.drawString(left_x, left_y, line)
         left_y -= 4 * mm
 
-    # Right column (summary)
+    # Summary (right column)
     right_y = y
     pdf.drawString(right_x, right_y, f"Total Amount: {total_amount:,.2f}")
     right_y -= 5 * mm
@@ -934,7 +928,6 @@ def generate_customer_ledger_pdf(
         pdf.drawString(right_x, right_y, f"Period: {period_label}")
         right_y -= 5 * mm
 
-    # Continue below the larger column
     y = min(left_y, right_y) - 10 * mm
 
     # AUTO-OPTIMIZED TABLE COLUMNS
@@ -957,12 +950,14 @@ def generate_customer_ledger_pdf(
     table_width = sum(w for _, w, _ in columns)
     row_height = 6 * mm
     bottom_limit = 60 * mm
-    # TABLE HEADER
+
+    # TABLE HEADER (no shading)
     def _draw_table_header(y):
-        pdf.setFillColor(HexColor("#F2F2F2"))
-        pdf.rect(left_x, y - 4 * mm, table_width, 6 * mm, fill=1, stroke=0)
         pdf.setFillColor(HexColor("#000000"))
         pdf.setFont("Helvetica-Bold", 8)
+
+        # Header border
+        pdf.rect(left_x, y - 4 * mm, table_width, 6 * mm, stroke=1, fill=0)
 
         x = left_x + 1 * mm
         for label, width_col, align in columns:
@@ -1029,7 +1024,10 @@ def generate_customer_ledger_pdf(
             y = height - 20 * mm
             y = _draw_table_header(y)
 
-        # Draw row
+        # Draw row border
+        pdf.rect(left_x, y, table_width, -total_row_height, stroke=1, fill=0)
+
+        # Draw row content
         for line_index in range(max_lines):
             x = left_x + 1 * mm
             for label, width_col, align in columns:
@@ -1084,6 +1082,7 @@ def generate_customer_ledger_pdf(
     pdf.save()
     buffer.seek(0)
     return buffer.read()
+
 
 
 
