@@ -612,6 +612,205 @@ def register_ttf_font(font_bytes: bytes | None, font_name: str = "InvoiceFont") 
                 pass
 
 
+def generate_invoice_pdf(
+    sale_row: pd.Series,
+    customer_row: pd.Series,
+    company_info: dict[str, str],
+    branding: dict[str, object] | None = None,
+) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    # Load signature image relative to utils.py
+    signature_path = os.path.join(os.path.dirname(__file__), "aniketsign.png")
+    signature_reader = None
+    if os.path.exists(signature_path):
+        try:
+            signature_reader = ImageReader(signature_path)
+        except Exception:
+            signature_reader = None
+
+    # Company info
+    company_name = company_info.get("name", "IMPALA ECO BRICKS AND TILES")
+    company_address = company_info.get("address", "")
+    company_gst = company_info.get("gst", "")
+
+    invoice_no = str(sale_row.get("Invoice_No", "")).strip() or str(
+        sale_row.get("Sales_ID", "")
+    ).strip()
+    invoice_date = str(sale_row.get("Date", "")).strip()
+    destination = str(sale_row.get("Destination", "")).strip()
+
+    branding = branding or {}
+    brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
+
+    # HEADER — centered
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawCentredString(width / 2, height - 18 * mm, company_name)
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawCentredString(width / 2, height - 24 * mm, company_address)
+    pdf.drawCentredString(width / 2, height - 29 * mm, f"GSTIN: {company_gst}")
+
+    # INVOICE keyword — centered
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawCentredString(width / 2, height - 38 * mm, "INVOICE")
+
+    # BILL TO + DESTINATION (side-by-side)
+    y = height - 55 * mm
+
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, y, "Bill To:")
+    pdf.drawString(120 * mm, y, "Destination:")
+    y -= 6 * mm
+
+    pdf.setFont("Helvetica", 9)
+
+    # Bill To
+    customer_name = str(customer_row.get("Name", "")).strip()
+    customer_address = str(customer_row.get("Address", "")).strip()
+    customer_city = str(customer_row.get("City", "")).strip()
+    customer_gst = str(customer_row.get("GST", "")).strip()
+
+    bill_to_address = customer_address
+    if customer_city and customer_city.lower() not in customer_address.lower():
+        bill_to_address += f", {customer_city}"
+
+    # Wrap Bill To
+    for line in textwrap.wrap(customer_name, width=35):
+        pdf.drawString(20 * mm, y, line)
+        y -= 4 * mm
+    for line in textwrap.wrap(bill_to_address, width=35):
+        pdf.drawString(20 * mm, y, line)
+        y -= 4 * mm
+    pdf.drawString(20 * mm, y, f"GST: {customer_gst}")
+
+    # Destination (right side)
+    y_dest = height - 61 * mm
+    for line in textwrap.wrap(destination, width=35):
+        pdf.drawString(120 * mm, y_dest, line)
+        y_dest -= 4 * mm
+
+    # Move Y down for Invoice Details
+    y -= 12 * mm
+
+    # INVOICE DETAILS — centered
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawCentredString(width / 2, y, "Invoice Details:")
+    y -= 6 * mm
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawCentredString(width / 2, y, f"Invoice No: {invoice_no}")
+    y -= 5 * mm
+    pdf.drawCentredString(width / 2, y, f"Date: {invoice_date}")
+    y -= 10 * mm
+
+    # DESCRIPTION TABLE
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, y, "Description")
+    pdf.drawRightString(120 * mm, y, "Qty")
+    pdf.drawRightString(150 * mm, y, "Rate")
+    pdf.drawRightString(190 * mm, y, "Amount")
+    y -= 5 * mm
+
+    pdf.line(20 * mm, y, 190 * mm, y)
+    y -= 6 * mm
+
+    # VALUES
+    qty = safe_float(sale_row.get("No_of_Bricks", 0))
+    raw_amount = safe_float(sale_row.get("Amount", 0))
+    raw_freight = safe_float(sale_row.get("Freight", 0))
+    adjusted_rate = safe_float(sale_row.get("Adjusted_Rate", 0))
+    if adjusted_rate <= 0 and qty > 0:
+        adjusted_rate = (raw_amount + raw_freight) / qty
+    adjusted_amount = safe_float(sale_row.get("Adjusted_Amount", 0))
+    if adjusted_amount <= 0:
+        adjusted_amount = adjusted_rate * qty
+    gst_amount = safe_float(
+        sale_row.get("GST(%12)", sale_row.get("Gst (%12)", sale_row.get("GST", 0)))
+    )
+    adjusted_total = safe_float(sale_row.get("Adjusted_Total_amount", 0))
+    total = adjusted_total if adjusted_total > 0 else safe_float(
+        sale_row.get("Total_Amount", adjusted_amount + gst_amount)
+    )
+    received = safe_float(sale_row.get("Amount_Received", 0))
+    due = safe_float(sale_row.get("Dues", sale_row.get("Due", total - received)))
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, y, "Fly-ash bricks")
+    pdf.drawRightString(120 * mm, y, f"{qty:,.0f}")
+    pdf.drawRightString(150 * mm, y, f"{adjusted_rate:,.2f}")
+    pdf.drawRightString(190 * mm, y, f"{adjusted_amount:,.2f}")
+    y -= 6 * mm
+
+    pdf.drawString(20 * mm, y, "GST (12%)")
+    pdf.drawRightString(190 * mm, y, f"{gst_amount:,.2f}")
+    y -= 6 * mm
+
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, y, "Total")
+    pdf.drawRightString(190 * mm, y, f"{total:,.2f}")
+    y -= 6 * mm
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, y, "Amount Received")
+    pdf.drawRightString(190 * mm, y, f"{received:,.2f}")
+    y -= 6 * mm
+
+    pdf.setFont("Helvetica-Bold", 9)
+    pdf.drawString(20 * mm, y, "Balance Due")
+    pdf.drawRightString(190 * mm, y, f"{due:,.2f}")
+    y -= 15 * mm
+
+    # PAY TO — Option A (replaced)
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, y, "Pay To:")
+    y -= 6 * mm
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, y, "CONTACT NO.: 8250876698")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "A/C NO.: 7392892219")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "PAN: BJQPS7761G")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "IFSC CODE: IDIB000B171")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "** GST SUBJECT TO NON REVERSE CHARGE BASIS")
+    y -= 12 * mm
+
+    # SIGNATURE — image above text (no gap)
+    if signature_reader:
+        sig_w = 40 * mm
+        sig_h = 15 * mm
+        pdf.drawImage(
+            signature_reader,
+            width - 60 * mm,
+            y,
+            sig_w,
+            sig_h,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+        y -= sig_h + 2 * mm
+
+    pdf.setFont("Helvetica", 9)
+    pdf.drawRightString(width - 20 * mm, y, "Authorized Signature")
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.read()
+
+
+
 def generate_customer_ledger_pdf(
     ledger_df: pd.DataFrame,
     customer_row: pd.Series,
@@ -902,6 +1101,7 @@ def generate_customer_ledger_pdf(
     pdf.save()
     buffer.seek(0)
     return buffer.read()
+
 
 
 
