@@ -726,14 +726,15 @@ def generate_invoice_pdf(
     pdf.drawString(20 * mm, height - 77 * mm, customer_name)
 
 
-    # NEW — Destination Section
+
+    # NEW — Destination below Bill To
     if destination:
         pdf.setFillColor(HexColor(brand_color))
         pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawString(120 * mm, height - 72 * mm, "Destination:")
+        pdf.drawString(20 * mm, height - 87 * mm, "Destination:")
         pdf.setFillColor(HexColor("#000000"))
         pdf.setFont("Helvetica", 9)
-        pdf.drawString(120 * mm, height - 77 * mm, destination)
+        pdf.drawString(20 * mm, height - 92 * mm, destination)
 
     address_parts = []
     if customer_address:
@@ -744,7 +745,9 @@ def generate_invoice_pdf(
             address_parts.append(customer_city)
     bill_to_address = ", ".join([part for part in address_parts if part]).strip()
 
-    address_y = height - 82 * mm
+    # address_y = height - 82 * mm
+    address_y = height - 97 * mm
+
     if bill_to_address:
         wrapped_address = textwrap.wrap(f"Address: {bill_to_address}", width=70)
         for line in wrapped_address:
