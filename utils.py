@@ -640,6 +640,7 @@ def generate_invoice_pdf(
         sale_row.get("Sales_ID", "")
     ).strip()
     invoice_date = str(sale_row.get("Date", "")).strip()
+    destination = str(sale_row.get("Destination", "")).strip()
 
     branding = branding or {}
     brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
@@ -723,6 +724,17 @@ def generate_invoice_pdf(
     pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, height - 77 * mm, customer_name)
+
+
+    # NEW — Destination Section
+    if destination:
+        pdf.setFillColor(HexColor(brand_color))
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(120 * mm, height - 72 * mm, "Destination:")
+        pdf.setFillColor(HexColor("#000000"))
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(120 * mm, height - 77 * mm, destination)
+
     address_parts = []
     if customer_address:
         address_parts.append(customer_address)
