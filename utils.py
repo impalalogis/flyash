@@ -718,23 +718,24 @@ def generate_invoice_pdf(
     customer_city = str(customer_row.get("City", "")).strip()
     customer_contact = str(customer_row.get("Contact", "")).strip()
     customer_gst = str(customer_row.get("GST", "")).strip()
-    pdf.setFillColor(HexColor(brand_color))
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, height - 72 * mm, "Bill To:")
-    pdf.setFillColor(HexColor("#000000"))
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, height - 77 * mm, customer_name)
-
-
-
-    # NEW — Destination below Bill To
-    if destination:
-        pdf.setFillColor(HexColor(brand_color))
-        pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawString(20 * mm, height - 87 * mm, "Destination:")
-        pdf.setFillColor(HexColor("#000000"))
-        pdf.setFont("Helvetica", 9)
-        pdf.drawString(20 * mm, height - 92 * mm, destination)
+    #
+    # pdf.setFillColor(HexColor(brand_color))
+    # pdf.setFont("Helvetica-Bold", 10)
+    # pdf.drawString(20 * mm, height - 72 * mm, "Bill To:")
+    # pdf.setFillColor(HexColor("#000000"))
+    # pdf.setFont("Helvetica", 9)
+    # pdf.drawString(20 * mm, height - 77 * mm, customer_name)
+    #
+    #
+    #
+    # # NEW — Destination below Bill To
+    # if destination:
+    #     pdf.setFillColor(HexColor(brand_color))
+    #     pdf.setFont("Helvetica-Bold", 10)
+    #     pdf.drawString(20 * mm, height - 87 * mm, "Destination:")
+    #     pdf.setFillColor(HexColor("#000000"))
+    #     pdf.setFont("Helvetica", 9)
+    #     pdf.drawString(20 * mm, height - 92 * mm, destination)
 
     address_parts = []
     if customer_address:
@@ -759,6 +760,48 @@ def generate_invoice_pdf(
         contact_y -= 4 * mm
     if customer_gst:
         pdf.drawString(20 * mm, contact_y, f"GST: {customer_gst}")
+
+    # --- BILL TO SECTION (REORDERED & CLEAN FORMATTING) ---
+    y_bill = height - 72 * mm
+
+    # Bill To (bold)
+    pdf.setFillColor(HexColor(brand_color))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, y_bill, "Bill To:")
+    y_bill -= 5 * mm
+
+    # Customer Name (bold)
+    pdf.setFillColor(HexColor("#000000"))
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, y_bill, customer_name)
+    y_bill -= 5 * mm
+
+    # Address (normal)
+    if bill_to_address:
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(20 * mm, y_bill, f"Address: {bill_to_address}")
+        y_bill -= 5 * mm
+
+    # GST (normal)
+    if customer_gst:
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(20 * mm, y_bill, f"GST: {customer_gst}")
+        y_bill -= 8 * mm
+
+    # --- DESTINATION SECTION ---
+    destination = str(sale_row.get("Destination", "")).strip()
+    if destination:
+        pdf.setFillColor(HexColor(brand_color))
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(20 * mm, y_bill, "Destination:")
+        y_bill -= 5 * mm
+
+        pdf.setFillColor(HexColor("#000000"))
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(20 * mm, y_bill, destination)
+        y_bill -= 5 * mm
+
+
 
     table_y = height - 105 * mm
     pdf.setFont("Helvetica-Bold", 9)
