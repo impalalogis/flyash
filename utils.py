@@ -621,9 +621,6 @@ def generate_invoice_pdf(
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib.colors import HexColor
-    from reportlab.graphics import renderPDF
-    from reportlab.graphics.barcode.qr import QrCodeWidget
-    from reportlab.graphics.shapes import Drawing
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas
 
@@ -643,7 +640,6 @@ def generate_invoice_pdf(
     # Company info
     company_name = company_info.get("name", "IMPALA ECO BRICKS AND TILES")
     company_address = company_info.get("address", "")
-    company_contact = company_info.get("contact", "")
     company_gst = company_info.get("gst", "")
 
     invoice_no = str(sale_row.get("Invoice_No", "")).strip() or str(
@@ -654,32 +650,27 @@ def generate_invoice_pdf(
 
     branding = branding or {}
     brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
-    terms = str(branding.get("terms", "")).strip()
-    payment_details = branding.get("payment_details") or {}
-    qr_data = str(branding.get("qr_data", "")).strip()
-    payment_label = str(payment_details.get("label", "")).strip() or "Payment Details"
 
-    # HEADER
-    pdf.setFillColor(HexColor("#000000"))
+    # HEADER — centered
     pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawCentredString(width / 2, height - 20 * mm, company_name)
+    pdf.drawCentredString(width / 2, height - 18 * mm, company_name)
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawCentredString(width / 2, height - 26 * mm, company_address)
-    pdf.drawCentredString(width / 2, height - 31 * mm, f"GSTIN: {company_gst}")
+    pdf.drawCentredString(width / 2, height - 24 * mm, company_address)
+    pdf.drawCentredString(width / 2, height - 29 * mm, f"GSTIN: {company_gst}")
 
-    # INVOICE keyword (right aligned)
+    # INVOICE keyword — centered
     pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawRightString(width - 20 * mm, height - 20 * mm, "INVOICE")
+    pdf.drawCentredString(width / 2, height - 38 * mm, "INVOICE")
 
     # BILL TO + DESTINATION (side-by-side)
-    y_top = height - 45 * mm
+    y = height - 55 * mm
 
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y_top, "Bill To:")
-    pdf.drawString(120 * mm, y_top, "Destination:")
+    pdf.drawString(20 * mm, y, "Bill To:")
+    pdf.drawString(120 * mm, y, "Destination:")
+    y -= 6 * mm
 
-    y_top -= 6 * mm
     pdf.setFont("Helvetica", 9)
 
     # Bill To
@@ -692,37 +683,45 @@ def generate_invoice_pdf(
     if customer_city and customer_city.lower() not in customer_address.lower():
         bill_to_address += f", {customer_city}"
 
-    pdf.drawString(20 * mm, y_top, customer_name)
-    pdf.drawString(120 * mm, y_top, destination)
-    y_top -= 5 * mm
+    # Wrap Bill To
+    for line in textwrap.wrap(customer_name, width=35):
+        pdf.drawString(20 * mm, y, line)
+        y -= 4 * mm
+    for line in textwrap.wrap(bill_to_address, width=35):
+        pdf.drawString(20 * mm, y, line)
+        y -= 4 * mm
+    pdf.drawString(20 * mm, y, f"GST: {customer_gst}")
 
-    pdf.drawString(20 * mm, y_top, bill_to_address)
-    y_top -= 5 * mm
+    # Destination (right side)
+    y_dest = height - 61 * mm
+    for line in textwrap.wrap(destination, width=35):
+        pdf.drawString(120 * mm, y_dest, line)
+        y_dest -= 4 * mm
 
-    pdf.drawString(20 * mm, y_top, f"GST: {customer_gst}")
-    y_top -= 10 * mm
+    # Move Y down for Invoice Details
+    y -= 12 * mm
 
-    # INVOICE DETAILS
+    # INVOICE DETAILS — centered
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y_top, "Invoice Details:")
-    y_top -= 6 * mm
+    pdf.drawCentredString(width / 2, y, "Invoice Details:")
+    y -= 6 * mm
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y_top, f"Invoice No: {invoice_no}")
-    y_top -= 5 * mm
-    pdf.drawString(20 * mm, y_top, f"Date: {invoice_date}")
-    y_top -= 10 * mm
+    pdf.drawCentredString(width / 2, y, f"Invoice No: {invoice_no}")
+    y -= 5 * mm
+    pdf.drawCentredString(width / 2, y, f"Date: {invoice_date}")
+    y -= 10 * mm
 
     # DESCRIPTION TABLE
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, y_top, "Description")
-    pdf.drawRightString(120 * mm, y_top, "Qty")
-    pdf.drawRightString(150 * mm, y_top, "Rate")
-    pdf.drawRightString(190 * mm, y_top, "Amount")
-    y_top -= 5 * mm
+    pdf.drawString(20 * mm, y, "Description")
+    pdf.drawRightString(120 * mm, y, "Qty")
+    pdf.drawRightString(150 * mm, y, "Rate")
+    pdf.drawRightString(190 * mm, y, "Amount")
+    y -= 5 * mm
 
-    pdf.line(20 * mm, y_top, 190 * mm, y_top)
-    y_top -= 6 * mm
+    pdf.line(20 * mm, y, 190 * mm, y)
+    y -= 6 * mm
 
     # VALUES
     qty = safe_float(sale_row.get("No_of_Bricks", 0))
@@ -745,69 +744,71 @@ def generate_invoice_pdf(
     due = safe_float(sale_row.get("Dues", sale_row.get("Due", total - received)))
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y_top, "Fly-ash bricks")
-    pdf.drawRightString(120 * mm, y_top, f"{qty:,.0f}")
-    pdf.drawRightString(150 * mm, y_top, f"{adjusted_rate:,.2f}")
-    pdf.drawRightString(190 * mm, y_top, f"{adjusted_amount:,.2f}")
-    y_top -= 6 * mm
+    pdf.drawString(20 * mm, y, "Fly-ash bricks")
+    pdf.drawRightString(120 * mm, y, f"{qty:,.0f}")
+    pdf.drawRightString(150 * mm, y, f"{adjusted_rate:,.2f}")
+    pdf.drawRightString(190 * mm, y, f"{adjusted_amount:,.2f}")
+    y -= 6 * mm
 
-    pdf.drawString(20 * mm, y_top, "GST (12%)")
-    pdf.drawRightString(190 * mm, y_top, f"{gst_amount:,.2f}")
-    y_top -= 6 * mm
+    pdf.drawString(20 * mm, y, "GST (12%)")
+    pdf.drawRightString(190 * mm, y, f"{gst_amount:,.2f}")
+    y -= 6 * mm
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, y_top, "Total")
-    pdf.drawRightString(190 * mm, y_top, f"{total:,.2f}")
-    y_top -= 6 * mm
+    pdf.drawString(20 * mm, y, "Total")
+    pdf.drawRightString(190 * mm, y, f"{total:,.2f}")
+    y -= 6 * mm
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y_top, "Amount Received")
-    pdf.drawRightString(190 * mm, y_top, f"{received:,.2f}")
-    y_top -= 6 * mm
+    pdf.drawString(20 * mm, y, "Amount Received")
+    pdf.drawRightString(190 * mm, y, f"{received:,.2f}")
+    y -= 6 * mm
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, y_top, "Balance Due")
-    pdf.drawRightString(190 * mm, y_top, f"{due:,.2f}")
-    y_top -= 10 * mm
+    pdf.drawString(20 * mm, y, "Balance Due")
+    pdf.drawRightString(190 * mm, y, f"{due:,.2f}")
+    y -= 15 * mm
 
-    # PAY TO SECTION
+    # PAY TO — Option A (replaced)
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y_top, "Pay To:")
-    y_top -= 6 * mm
+    pdf.drawString(20 * mm, y, "Pay To:")
+    y -= 6 * mm
 
     pdf.setFont("Helvetica", 9)
-    if payment_details.get("account_no"):
-        pdf.drawString(20 * mm, y_top, f"Account No.: {payment_details.get('account_no')}")
-        y_top -= 5 * mm
-    if payment_details.get("ifsc"):
-        pdf.drawString(20 * mm, y_top, f"IFSC: {payment_details.get('ifsc')}")
-        y_top -= 5 * mm
-    if payment_details.get("pan"):
-        pdf.drawString(20 * mm, y_top, f"PAN: {payment_details.get('pan')}")
-        y_top -= 10 * mm
+    pdf.drawString(20 * mm, y, "CONTACT NO.: 8250876698")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "A/C NO.: 7392892219")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "PAN: BJQPS7761G")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "IFSC CODE: IDIB000B171")
+    y -= 5 * mm
+    pdf.drawString(20 * mm, y, "** GST SUBJECT TO NON REVERSE CHARGE BASIS")
+    y -= 12 * mm
 
-    # SIGNATURE (Option 4 — image above text)
+    # SIGNATURE — image above text (no gap)
     if signature_reader:
         sig_w = 40 * mm
         sig_h = 15 * mm
         pdf.drawImage(
             signature_reader,
             width - 60 * mm,
-            y_top,
+            y,
             sig_w,
             sig_h,
             preserveAspectRatio=True,
             mask="auto",
         )
-        y_top -= sig_h + 2 * mm
+        y -= sig_h + 2 * mm
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawRightString(width - 20 * mm, y_top, "Authorized Signature")
+    pdf.drawRightString(width - 20 * mm, y, "Authorized Signature")
 
     pdf.showPage()
     pdf.save()
     buffer.seek(0)
     return buffer.read()
+
 
 
 def generate_customer_ledger_pdf(
