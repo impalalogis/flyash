@@ -713,76 +713,44 @@ def generate_invoice_pdf(
     pdf.drawString(20 * mm, height - 54 * mm, f"Invoice No: {invoice_no}")
     pdf.drawString(20 * mm, height - 59 * mm, f"Date: {invoice_date}")
 
+    # --- BILL TO + DESTINATION (CLEAN, NO OVERLAP) ---
+
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
     customer_city = str(customer_row.get("City", "")).strip()
-    customer_contact = str(customer_row.get("Contact", "")).strip()
     customer_gst = str(customer_row.get("GST", "")).strip()
-    #
-    # pdf.setFillColor(HexColor(brand_color))
-    # pdf.setFont("Helvetica-Bold", 10)
-    # pdf.drawString(20 * mm, height - 72 * mm, "Bill To:")
-    # pdf.setFillColor(HexColor("#000000"))
-    # pdf.setFont("Helvetica", 9)
-    # pdf.drawString(20 * mm, height - 77 * mm, customer_name)
-    #
-    #
-    #
-    # # NEW — Destination below Bill To
-    # if destination:
-    #     pdf.setFillColor(HexColor(brand_color))
-    #     pdf.setFont("Helvetica-Bold", 10)
-    #     pdf.drawString(20 * mm, height - 87 * mm, "Destination:")
-    #     pdf.setFillColor(HexColor("#000000"))
-    #     pdf.setFont("Helvetica", 9)
-    #     pdf.drawString(20 * mm, height - 92 * mm, destination)
 
+    # Build Bill-To address
     address_parts = []
     if customer_address:
         address_parts.append(customer_address)
-    if customer_city:
-        city_present_in_address = customer_city.lower() in customer_address.lower()
-        if not city_present_in_address:
-            address_parts.append(customer_city)
-    bill_to_address = ", ".join([part for part in address_parts if part]).strip()
+    if customer_city and customer_city.lower() not in customer_address.lower():
+        address_parts.append(customer_city)
 
-    # address_y = height - 82 * mm
-    address_y = height - 97 * mm
+    bill_to_address = ", ".join([p for p in address_parts if p]).strip()
 
-    if bill_to_address:
-        wrapped_address = textwrap.wrap(f"Address: {bill_to_address}", width=70)
-        for line in wrapped_address:
-            pdf.drawString(20 * mm, address_y, line)
-            address_y -= 4 * mm
-    contact_y = address_y if bill_to_address else height - 82 * mm
-    if customer_contact:
-        pdf.drawString(20 * mm, contact_y, f"Contact: {customer_contact}")
-        contact_y -= 4 * mm
-    if customer_gst:
-        pdf.drawString(20 * mm, contact_y, f"GST: {customer_gst}")
-
-    # --- BILL TO SECTION (REORDERED & CLEAN FORMATTING) ---
+    # Start Bill-To block
     y_bill = height - 72 * mm
 
-    # Bill To (bold)
+    # Bill To label
     pdf.setFillColor(HexColor(brand_color))
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(20 * mm, y_bill, "Bill To:")
     y_bill -= 5 * mm
 
-    # Customer Name (bold)
+    # Customer Name
     pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(20 * mm, y_bill, customer_name)
     y_bill -= 5 * mm
 
-    # Address (normal)
+    # Address
     if bill_to_address:
         pdf.setFont("Helvetica", 9)
         pdf.drawString(20 * mm, y_bill, f"Address: {bill_to_address}")
         y_bill -= 5 * mm
 
-    # GST (normal)
+    # GST
     if customer_gst:
         pdf.setFont("Helvetica", 9)
         pdf.drawString(20 * mm, y_bill, f"GST: {customer_gst}")
@@ -790,6 +758,7 @@ def generate_invoice_pdf(
 
     # --- DESTINATION SECTION ---
     destination = str(sale_row.get("Destination", "")).strip()
+
     if destination:
         pdf.setFillColor(HexColor(brand_color))
         pdf.setFont("Helvetica-Bold", 10)
@@ -800,8 +769,6 @@ def generate_invoice_pdf(
         pdf.setFont("Helvetica", 9)
         pdf.drawString(20 * mm, y_bill, destination)
         y_bill -= 5 * mm
-
-
 
     table_y = height - 105 * mm
     pdf.setFont("Helvetica-Bold", 9)
