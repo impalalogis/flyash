@@ -612,205 +612,6 @@ def register_ttf_font(font_bytes: bytes | None, font_name: str = "InvoiceFont") 
                 pass
 
 
-def generate_invoice_pdf(
-    sale_row: pd.Series,
-    customer_row: pd.Series,
-    company_info: dict[str, str],
-    branding: dict[str, object] | None = None,
-) -> bytes:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import mm
-    from reportlab.lib.colors import HexColor
-    from reportlab.lib.utils import ImageReader
-    from reportlab.pdfgen import canvas
-
-    buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-
-    # Load signature image relative to utils.py
-    signature_path = os.path.join(os.path.dirname(__file__), "aniketsign.png")
-    signature_reader = None
-    if os.path.exists(signature_path):
-        try:
-            signature_reader = ImageReader(signature_path)
-        except Exception:
-            signature_reader = None
-
-    # Company info
-    company_name = company_info.get("name", "IMPALA ECO BRICKS AND TILES")
-    company_address = company_info.get("address", "")
-    company_gst = company_info.get("gst", "")
-
-    invoice_no = str(sale_row.get("Invoice_No", "")).strip() or str(
-        sale_row.get("Sales_ID", "")
-    ).strip()
-    invoice_date = str(sale_row.get("Date", "")).strip()
-    destination = str(sale_row.get("Destination", "")).strip()
-
-    branding = branding or {}
-    brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
-
-    # HEADER — centered
-    pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawCentredString(width / 2, height - 18 * mm, company_name)
-
-    pdf.setFont("Helvetica", 9)
-    pdf.drawCentredString(width / 2, height - 24 * mm, company_address)
-    pdf.drawCentredString(width / 2, height - 29 * mm, f"GSTIN: {company_gst}")
-
-    # INVOICE keyword — centered
-    pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawCentredString(width / 2, height - 38 * mm, "INVOICE")
-
-    # BILL TO + DESTINATION (side-by-side)
-    y = height - 55 * mm
-
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y, "Bill To:")
-    pdf.drawString(120 * mm, y, "Destination:")
-    y -= 6 * mm
-
-    pdf.setFont("Helvetica", 9)
-
-    # Bill To
-    customer_name = str(customer_row.get("Name", "")).strip()
-    customer_address = str(customer_row.get("Address", "")).strip()
-    customer_city = str(customer_row.get("City", "")).strip()
-    customer_gst = str(customer_row.get("GST", "")).strip()
-
-    bill_to_address = customer_address
-    if customer_city and customer_city.lower() not in customer_address.lower():
-        bill_to_address += f", {customer_city}"
-
-    # Wrap Bill To
-    for line in textwrap.wrap(customer_name, width=35):
-        pdf.drawString(20 * mm, y, line)
-        y -= 4 * mm
-    for line in textwrap.wrap(bill_to_address, width=35):
-        pdf.drawString(20 * mm, y, line)
-        y -= 4 * mm
-    pdf.drawString(20 * mm, y, f"GST: {customer_gst}")
-
-    # Destination (right side)
-    y_dest = height - 61 * mm
-    for line in textwrap.wrap(destination, width=35):
-        pdf.drawString(120 * mm, y_dest, line)
-        y_dest -= 4 * mm
-
-    # Move Y down for Invoice Details
-    y -= 12 * mm
-
-    # INVOICE DETAILS — centered
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawCentredString(width / 2, y, "Invoice Details:")
-    y -= 6 * mm
-
-    pdf.setFont("Helvetica", 9)
-    pdf.drawCentredString(width / 2, y, f"Invoice No: {invoice_no}")
-    y -= 5 * mm
-    pdf.drawCentredString(width / 2, y, f"Date: {invoice_date}")
-    y -= 10 * mm
-
-    # DESCRIPTION TABLE
-    pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, y, "Description")
-    pdf.drawRightString(120 * mm, y, "Qty")
-    pdf.drawRightString(150 * mm, y, "Rate")
-    pdf.drawRightString(190 * mm, y, "Amount")
-    y -= 5 * mm
-
-    pdf.line(20 * mm, y, 190 * mm, y)
-    y -= 6 * mm
-
-    # VALUES
-    qty = safe_float(sale_row.get("No_of_Bricks", 0))
-    raw_amount = safe_float(sale_row.get("Amount", 0))
-    raw_freight = safe_float(sale_row.get("Freight", 0))
-    adjusted_rate = safe_float(sale_row.get("Adjusted_Rate", 0))
-    if adjusted_rate <= 0 and qty > 0:
-        adjusted_rate = (raw_amount + raw_freight) / qty
-    adjusted_amount = safe_float(sale_row.get("Adjusted_Amount", 0))
-    if adjusted_amount <= 0:
-        adjusted_amount = adjusted_rate * qty
-    gst_amount = safe_float(
-        sale_row.get("GST(%12)", sale_row.get("Gst (%12)", sale_row.get("GST", 0)))
-    )
-    adjusted_total = safe_float(sale_row.get("Adjusted_Total_amount", 0))
-    total = adjusted_total if adjusted_total > 0 else safe_float(
-        sale_row.get("Total_Amount", adjusted_amount + gst_amount)
-    )
-    received = safe_float(sale_row.get("Amount_Received", 0))
-    due = safe_float(sale_row.get("Dues", sale_row.get("Due", total - received)))
-
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y, "Fly-ash bricks")
-    pdf.drawRightString(120 * mm, y, f"{qty:,.0f}")
-    pdf.drawRightString(150 * mm, y, f"{adjusted_rate:,.2f}")
-    pdf.drawRightString(190 * mm, y, f"{adjusted_amount:,.2f}")
-    y -= 6 * mm
-
-    pdf.drawString(20 * mm, y, "GST (12%)")
-    pdf.drawRightString(190 * mm, y, f"{gst_amount:,.2f}")
-    y -= 6 * mm
-
-    pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, y, "Total")
-    pdf.drawRightString(190 * mm, y, f"{total:,.2f}")
-    y -= 6 * mm
-
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y, "Amount Received")
-    pdf.drawRightString(190 * mm, y, f"{received:,.2f}")
-    y -= 6 * mm
-
-    pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, y, "Balance Due")
-    pdf.drawRightString(190 * mm, y, f"{due:,.2f}")
-    y -= 15 * mm
-
-    # PAY TO — Option A (replaced)
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y, "Pay To:")
-    y -= 6 * mm
-
-    pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y, "CONTACT NO.: 8250876698")
-    y -= 5 * mm
-    pdf.drawString(20 * mm, y, "A/C NO.: 7392892219")
-    y -= 5 * mm
-    pdf.drawString(20 * mm, y, "PAN: BJQPS7761G")
-    y -= 5 * mm
-    pdf.drawString(20 * mm, y, "IFSC CODE: IDIB000B171")
-    y -= 5 * mm
-    pdf.drawString(20 * mm, y, "** GST SUBJECT TO NON REVERSE CHARGE BASIS")
-    y -= 12 * mm
-
-    # SIGNATURE — image above text (no gap)
-    if signature_reader:
-        sig_w = 40 * mm
-        sig_h = 15 * mm
-        pdf.drawImage(
-            signature_reader,
-            width - 60 * mm,
-            y,
-            sig_w,
-            sig_h,
-            preserveAspectRatio=True,
-            mask="auto",
-        )
-        y -= sig_h + 2 * mm
-
-    pdf.setFont("Helvetica", 9)
-    pdf.drawRightString(width - 20 * mm, y, "Authorized Signature")
-
-    pdf.showPage()
-    pdf.save()
-    buffer.seek(0)
-    return buffer.read()
-
-
-
 def generate_customer_ledger_pdf(
     ledger_df: pd.DataFrame,
     customer_row: pd.Series,
@@ -820,6 +621,11 @@ def generate_customer_ledger_pdf(
     title: str = "Customer Ledger",
     period_label: str = "",
 ) -> bytes:
+    import io
+    import os
+    import textwrap
+    from datetime import datetime, date
+
     from reportlab.pdfbase import pdfmetrics
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -834,7 +640,7 @@ def generate_customer_ledger_pdf(
     branding = branding or {}
     brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
 
-    # Load signature image relative to utils.py
+    # Signature image (relative to this file)
     signature_path = os.path.join(os.path.dirname(__file__), "aniketsign.png")
     signature_reader = None
     if os.path.exists(signature_path):
@@ -867,12 +673,13 @@ def generate_customer_ledger_pdf(
         total_received = float(pd.to_numeric(ledger_df.get("Amount_Received", 0), errors="coerce").fillna(0).sum())
         total_due = float(pd.to_numeric(ledger_df.get("Due", 0), errors="coerce").fillna(0).sum())
 
-    # Date formatter
-    def _format_date(value):
+    def _format_date(value: object) -> str:
+        if isinstance(value, (date, datetime)):
+            return pd.to_datetime(value).strftime("%d-%b-%Y")
         parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
         return parsed.strftime("%d-%b-%Y") if not pd.isna(parsed) else str(value)
 
-    # HEADER (centered)
+    # HEADER
     pdf.setFont("Helvetica-Bold", 14)
     pdf.drawCentredString(width / 2, height - 18 * mm, company_name)
 
@@ -880,15 +687,14 @@ def generate_customer_ledger_pdf(
     pdf.drawCentredString(width / 2, height - 24 * mm, company_address)
     pdf.drawCentredString(width / 2, height - 29 * mm, f"GSTIN: {company_gst}")
 
-    # TITLE (centered)
+    # TITLE
     pdf.setFont("Helvetica-Bold", 16)
     pdf.drawCentredString(width / 2, height - 38 * mm, title)
 
-    # CUSTOMER DETAILS + SUMMARY (side-by-side)
+    # CUSTOMER DETAILS + SUMMARY SIDE BY SIDE
     y = height - 55 * mm
-
     left_x = 20 * mm
-    right_x = 108 * mm  # shifted left as requested
+    right_x = 125 * mm  # move summary clearly to the right
 
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(left_x, y, "Customer Details")
@@ -897,12 +703,10 @@ def generate_customer_ledger_pdf(
 
     pdf.setFont("Helvetica", 9)
 
-    # Customer details
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_gst = str(customer_row.get("GST", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
 
-    # Address formatting (no line break after "Address:")
     address_lines = textwrap.wrap(f"Address: {customer_address}", width=70)
 
     left_y = y
@@ -916,7 +720,6 @@ def generate_customer_ledger_pdf(
         pdf.drawString(left_x, left_y, line)
         left_y -= 4 * mm
 
-    # Summary (right column)
     right_y = y
     pdf.drawString(right_x, right_y, f"Total Amount: {total_amount:,.2f}")
     right_y -= 5 * mm
@@ -930,7 +733,7 @@ def generate_customer_ledger_pdf(
 
     y = min(left_y, right_y) - 10 * mm
 
-    # AUTO-OPTIMIZED TABLE COLUMNS
+    # TABLE COLUMNS (auto width for Description)
     columns = [
         ("Date", 18 * mm, "left"),
         ("Type", 16 * mm, "center"),
@@ -942,75 +745,81 @@ def generate_customer_ledger_pdf(
     ]
 
     fixed_width = sum(w for _, w, _ in columns if w > 0)
-    remaining = (width - 30 * mm) - fixed_width
+    available_width = (width - 30 * mm) - fixed_width
     for i, (label, w, align) in enumerate(columns):
         if w == 0:
-            columns[i] = (label, remaining, align)
+            columns[i] = (label, available_width, align)
 
     table_width = sum(w for _, w, _ in columns)
+    table_left = left_x
     row_height = 6 * mm
-    bottom_limit = 60 * mm
+    bottom_limit = 60 * mm  # leave room for Pay To + signature
 
-    # TABLE HEADER (no shading)
-    def _draw_table_header(y):
-        pdf.setFillColor(HexColor("#000000"))
+    # Precompute column x positions for vertical borders
+    col_x_positions = [table_left]
+    acc = table_left
+    for _, w, _ in columns:
+        acc += w
+        col_x_positions.append(acc)
+
+    def _draw_table_header(y_pos: float) -> float:
         pdf.setFont("Helvetica-Bold", 8)
-
-        # Header border
-        pdf.rect(left_x, y - 4 * mm, table_width, 6 * mm, stroke=1, fill=0)
-
-        x = left_x + 1 * mm
-        for label, width_col, align in columns:
+        # Header outer rect
+        pdf.rect(table_left, y_pos - 4 * mm, table_width, 6 * mm, stroke=1, fill=0)
+        # Vertical lines
+        for x_line in col_x_positions:
+            pdf.line(x_line, y_pos - 4 * mm, x_line, y_pos + 2 * mm)
+        # Text
+        x = table_left
+        for (label, w, align) in columns:
             if align == "right":
-                pdf.drawRightString(x + width_col - 1 * mm, y, label)
+                pdf.drawRightString(x + w - 1 * mm, y_pos, label)
             elif align == "center":
-                pdf.drawCentredString(x + width_col / 2, y, label)
+                pdf.drawCentredString(x + w / 2, y_pos, label)
             else:
-                pdf.drawString(x, y, label)
-            x += width_col
+                pdf.drawString(x + 1 * mm, y_pos, label)
+            x += w
+        return y_pos - row_height
 
-        return y - row_height
+    def _wrap_text(text: str, max_width: float) -> list[str]:
+        if not text:
+            return [""]
+        words = text.split()
+        lines: list[str] = []
+        current = ""
+        for w in words:
+            test = (current + " " + w).strip()
+            if pdfmetrics.stringWidth(test, "Helvetica", 8) <= max_width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = w
+        if current:
+            lines.append(current)
+        return lines or [""]
 
     y = _draw_table_header(y)
     pdf.setFont("Helvetica", 8)
 
-    # TEXT WRAPPING
-    def wrap(text, max_width):
-        if not text:
-            return [""]
-        words = text.split()
-        lines = []
-        current = ""
-        for w in words:
-            test = f"{current} {w}".strip()
-            if pdfmetrics.stringWidth(test, "Helvetica", 8) <= max_width:
-                current = test
-            else:
-                lines.append(current)
-                current = w
-        if current:
-            lines.append(current)
-        return lines
-
-    # TABLE ROWS
     for _, row in ledger_df.iterrows():
         values = {
             "Date": _format_date(row.get("Date", "")),
-            "Type": str(row.get("Type", "")),
-            "Reference": str(row.get("Reference", "")),
-            "Description": str(row.get("Description", "")),
+            "Type": str(row.get("Type", "")).strip(),
+            "Reference": str(row.get("Reference", "")).strip(),
+            "Description": str(row.get("Description", "")).strip(),
             "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
             "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
             "Balance": f"{safe_float(row.get('Running_Balance', row.get('Running Balance', 0))):,.2f}",
         }
 
         # Wrap Reference + Description
-        wrapped = {}
+        wrapped: dict[str, list[str]] = {}
         max_lines = 1
-        for label, width_col, _ in columns:
+        for (label, w, _) in columns:
             text = values[label]
             if label in ("Reference", "Description"):
-                lines = wrap(text, width_col - 2 * mm)
+                lines = _wrap_text(text, w - 2 * mm)
             else:
                 lines = [text]
             wrapped[label] = lines
@@ -1021,26 +830,37 @@ def generate_customer_ledger_pdf(
         # Page break
         if y - total_row_height < bottom_limit:
             pdf.showPage()
-            y = height - 20 * mm
+            # redraw header on new page
+            y = height - 30 * mm
             y = _draw_table_header(y)
+            pdf.setFont("Helvetica", 8)
 
-        # Draw row border
-        pdf.rect(left_x, y, table_width, -total_row_height, stroke=1, fill=0)
+        # Draw row outer rect
+        top_y = y
+        bottom_y = y - total_row_height
+        pdf.rect(table_left, bottom_y, table_width, total_row_height, stroke=1, fill=0)
 
-        # Draw row content
-        for line_index in range(max_lines):
-            x = left_x + 1 * mm
-            for label, width_col, align in columns:
+        # Vertical column lines for this row
+        for x_line in col_x_positions:
+            pdf.line(x_line, bottom_y, x_line, top_y)
+
+        # Horizontal internal lines (between wrapped lines)
+        # (optional; here we keep only outer row box, grid is by columns+rows)
+        # Draw text line by line
+        for line_idx in range(max_lines):
+            line_y = y - line_idx * row_height
+            x = table_left
+            for (label, w, align) in columns:
                 lines = wrapped[label]
-                text = lines[line_index] if line_index < len(lines) else ""
+                text = lines[line_idx] if line_idx < len(lines) else ""
                 if align == "right":
-                    pdf.drawRightString(x + width_col - 1 * mm, y, text)
+                    pdf.drawRightString(x + w - 1 * mm, line_y, text)
                 elif align == "center":
-                    pdf.drawCentredString(x + width_col / 2, y, text)
+                    pdf.drawCentredString(x + w / 2, line_y, text)
                 else:
-                    pdf.drawString(x, y, text)
-                x += width_col
-            y -= row_height
+                    pdf.drawString(x + 1 * mm, line_y, text)
+                x += w
+        y -= total_row_height
 
     # PAY TO SECTION (immediately after table)
     y -= 10 * mm
