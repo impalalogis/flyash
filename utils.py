@@ -631,7 +631,17 @@ def generate_invoice_pdf(
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    company_name = company_info.get("name", "Fly-Ash Brick Unit")
+    # Load signature image relative to utils.py
+    signature_path = os.path.join(os.path.dirname(__file__), "aniketsign.png")
+    signature_reader = None
+    if os.path.exists(signature_path):
+        try:
+            signature_reader = ImageReader(signature_path)
+        except Exception:
+            signature_reader = None
+
+    # Company info
+    company_name = company_info.get("name", "IMPALA ECO BRICKS AND TILES")
     company_address = company_info.get("address", "")
     company_contact = company_info.get("contact", "")
     company_gst = company_info.get("gst", "")
@@ -644,139 +654,77 @@ def generate_invoice_pdf(
 
     branding = branding or {}
     brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
-    logo_bytes = branding.get("logo_bytes")
-    signature_bytes = branding.get("signature_bytes")
     terms = str(branding.get("terms", "")).strip()
-    font_bytes = branding.get("font_bytes")
-    terms_font_name = register_ttf_font(font_bytes) or "Helvetica"
-    watermark_text = str(branding.get("watermark_text", "")).strip() or company_name
     payment_details = branding.get("payment_details") or {}
     qr_data = str(branding.get("qr_data", "")).strip()
     payment_label = str(payment_details.get("label", "")).strip() or "Payment Details"
 
-    if watermark_text:
-        pdf.saveState()
-        pdf.setFillColor(HexColor("#EEEEEE"))
-        pdf.setFont("Helvetica-Bold", 60)
-        pdf.translate(width / 2, height / 2)
-        pdf.rotate(35)
-        pdf.drawCentredString(0, 0, watermark_text)
-        pdf.restoreState()
-
-    if logo_bytes:
-        try:
-            logo_reader = ImageReader(io.BytesIO(logo_bytes))
-            logo_width, logo_height = logo_reader.getSize()
-            max_width = 40 * mm
-            max_height = 20 * mm
-            scale = min(max_width / logo_width, max_height / logo_height)
-            render_width = logo_width * scale
-            render_height = logo_height * scale
-            pdf.drawImage(
-                logo_reader,
-                width - 20 * mm - render_width,
-                height - 25 * mm,
-                render_width,
-                render_height,
-                preserveAspectRatio=True,
-                mask="auto",
-            )
-        except Exception:
-            pass
-
-    header_height = 18 * mm
-    pdf.setFillColor(HexColor(brand_color))
-    pdf.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
-    pdf.setFillColor(HexColor("#FFFFFF"))
+    # HEADER
+    pdf.setFillColor(HexColor("#000000"))
     pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(20 * mm, height - 12 * mm, company_name)
-    pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawRightString(width - 20 * mm, height - 12 * mm, "INVOICE")
-    pdf.setFillColor(HexColor("#000000"))
+    pdf.drawCentredString(width / 2, height - 20 * mm, company_name)
+
     pdf.setFont("Helvetica", 9)
-    y = height - 32 * mm
-    if company_address:
-        pdf.drawString(20 * mm, y, company_address)
-        y -= 4 * mm
-    if company_contact:
-        pdf.drawString(20 * mm, y, f"Contact: {company_contact}")
-        y -= 4 * mm
-    if company_gst:
-        pdf.drawString(20 * mm, y, f"GST: {company_gst}")
-        y -= 4 * mm
+    pdf.drawCentredString(width / 2, height - 26 * mm, company_address)
+    pdf.drawCentredString(width / 2, height - 31 * mm, f"GSTIN: {company_gst}")
 
-    pdf.setFillColor(HexColor(brand_color))
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(20 * mm, height - 48 * mm, "Invoice Details")
-    pdf.setFillColor(HexColor("#000000"))
+    # INVOICE keyword (right aligned)
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawRightString(width - 20 * mm, height - 20 * mm, "INVOICE")
+
+    # BILL TO + DESTINATION (side-by-side)
+    y_top = height - 45 * mm
+
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, y_top, "Bill To:")
+    pdf.drawString(120 * mm, y_top, "Destination:")
+
+    y_top -= 6 * mm
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, height - 54 * mm, f"Invoice No: {invoice_no}")
-    pdf.drawString(20 * mm, height - 59 * mm, f"Date: {invoice_date}")
 
-    # --- BILL TO + DESTINATION (CLEAN, NO OVERLAP) ---
-
+    # Bill To
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
     customer_city = str(customer_row.get("City", "")).strip()
     customer_gst = str(customer_row.get("GST", "")).strip()
 
-    # Build Bill-To address
-    address_parts = []
-    if customer_address:
-        address_parts.append(customer_address)
+    bill_to_address = customer_address
     if customer_city and customer_city.lower() not in customer_address.lower():
-        address_parts.append(customer_city)
+        bill_to_address += f", {customer_city}"
 
-    bill_to_address = ", ".join([p for p in address_parts if p]).strip()
+    pdf.drawString(20 * mm, y_top, customer_name)
+    pdf.drawString(120 * mm, y_top, destination)
+    y_top -= 5 * mm
 
-    # Start Bill-To block
-    y_bill = height - 72 * mm
+    pdf.drawString(20 * mm, y_top, bill_to_address)
+    y_top -= 5 * mm
 
-    # Bill To label
-    pdf.setFillColor(HexColor(brand_color))
+    pdf.drawString(20 * mm, y_top, f"GST: {customer_gst}")
+    y_top -= 10 * mm
+
+    # INVOICE DETAILS
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y_bill, "Bill To:")
-    y_bill -= 5 * mm
+    pdf.drawString(20 * mm, y_top, "Invoice Details:")
+    y_top -= 6 * mm
 
-    # Customer Name
-    pdf.setFillColor(HexColor("#000000"))
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(20 * mm, y_bill, customer_name)
-    y_bill -= 5 * mm
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(20 * mm, y_top, f"Invoice No: {invoice_no}")
+    y_top -= 5 * mm
+    pdf.drawString(20 * mm, y_top, f"Date: {invoice_date}")
+    y_top -= 10 * mm
 
-    # Address
-    if bill_to_address:
-        pdf.setFont("Helvetica", 9)
-        pdf.drawString(20 * mm, y_bill, f"Address: {bill_to_address}")
-        y_bill -= 5 * mm
-
-    # GST
-    if customer_gst:
-        pdf.setFont("Helvetica", 9)
-        pdf.drawString(20 * mm, y_bill, f"GST: {customer_gst}")
-        y_bill -= 8 * mm
-
-    # --- DESTINATION SECTION ---
-    destination = str(sale_row.get("Destination", "")).strip()
-
-    if destination:
-        pdf.setFillColor(HexColor(brand_color))
-        pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawString(20 * mm, y_bill, "Destination:")
-        y_bill -= 5 * mm
-
-        pdf.setFillColor(HexColor("#000000"))
-        pdf.setFont("Helvetica", 9)
-        pdf.drawString(20 * mm, y_bill, destination)
-        y_bill -= 5 * mm
-
-    table_y = height - 105 * mm
+    # DESCRIPTION TABLE
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y, "Description")
-    pdf.drawRightString(120 * mm, table_y, "Qty")
-    pdf.drawRightString(150 * mm, table_y, "Rate")
-    pdf.drawRightString(190 * mm, table_y, "Amount")
+    pdf.drawString(20 * mm, y_top, "Description")
+    pdf.drawRightString(120 * mm, y_top, "Qty")
+    pdf.drawRightString(150 * mm, y_top, "Rate")
+    pdf.drawRightString(190 * mm, y_top, "Amount")
+    y_top -= 5 * mm
 
+    pdf.line(20 * mm, y_top, 190 * mm, y_top)
+    y_top -= 6 * mm
+
+    # VALUES
     qty = safe_float(sale_row.get("No_of_Bricks", 0))
     raw_amount = safe_float(sale_row.get("Amount", 0))
     raw_freight = safe_float(sale_row.get("Freight", 0))
@@ -787,125 +735,74 @@ def generate_invoice_pdf(
     if adjusted_amount <= 0:
         adjusted_amount = adjusted_rate * qty
     gst_amount = safe_float(
-        sale_row.get(
-            "GST(%12)",
-            sale_row.get("Gst (%12)", sale_row.get("GST", 0)),
-        )
+        sale_row.get("GST(%12)", sale_row.get("Gst (%12)", sale_row.get("GST", 0)))
     )
     adjusted_total = safe_float(sale_row.get("Adjusted_Total_amount", 0))
-    total = (
-        adjusted_total
-        if adjusted_total > 0
-        else safe_float(sale_row.get("Total_Amount", adjusted_amount + gst_amount))
+    total = adjusted_total if adjusted_total > 0 else safe_float(
+        sale_row.get("Total_Amount", adjusted_amount + gst_amount)
     )
     received = safe_float(sale_row.get("Amount_Received", 0))
     due = safe_float(sale_row.get("Dues", sale_row.get("Due", total - received)))
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, table_y - 6 * mm, "Fly-ash bricks")
-    pdf.drawRightString(120 * mm, table_y - 6 * mm, f"{qty:,.0f}")
-    pdf.drawRightString(150 * mm, table_y - 6 * mm, f"{adjusted_rate:,.2f}")
-    pdf.drawRightString(190 * mm, table_y - 6 * mm, f"{adjusted_amount:,.2f}")
+    pdf.drawString(20 * mm, y_top, "Fly-ash bricks")
+    pdf.drawRightString(120 * mm, y_top, f"{qty:,.0f}")
+    pdf.drawRightString(150 * mm, y_top, f"{adjusted_rate:,.2f}")
+    pdf.drawRightString(190 * mm, y_top, f"{adjusted_amount:,.2f}")
+    y_top -= 6 * mm
 
-    pdf.drawString(20 * mm, table_y - 12 * mm, "GST (12%)")
-    pdf.drawRightString(190 * mm, table_y - 12 * mm, f"{gst_amount:,.2f}")
+    pdf.drawString(20 * mm, y_top, "GST (12%)")
+    pdf.drawRightString(190 * mm, y_top, f"{gst_amount:,.2f}")
+    y_top -= 6 * mm
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y - 20 * mm, "Total")
-    pdf.drawRightString(190 * mm, table_y - 20 * mm, f"{total:,.2f}")
+    pdf.drawString(20 * mm, y_top, "Total")
+    pdf.drawRightString(190 * mm, y_top, f"{total:,.2f}")
+    y_top -= 6 * mm
 
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, table_y - 28 * mm, "Amount Received")
-    pdf.drawRightString(190 * mm, table_y - 28 * mm, f"{received:,.2f}")
+    pdf.drawString(20 * mm, y_top, "Amount Received")
+    pdf.drawRightString(190 * mm, y_top, f"{received:,.2f}")
+    y_top -= 6 * mm
 
     pdf.setFont("Helvetica-Bold", 9)
-    pdf.drawString(20 * mm, table_y - 36 * mm, "Balance Due")
-    pdf.drawRightString(190 * mm, table_y - 36 * mm, f"{due:,.2f}")
+    pdf.drawString(20 * mm, y_top, "Balance Due")
+    pdf.drawRightString(190 * mm, y_top, f"{due:,.2f}")
+    y_top -= 10 * mm
 
-    footer_y = 18 * mm
-    reserved_bottom = footer_y + (40 * mm if (qr_data or payment_details) else 10 * mm)
-    terms_start = table_y - 46 * mm
-    if terms:
-        pdf.setFont(terms_font_name, 7)
-        text = pdf.beginText(20 * mm, terms_start)
-        text.textLine("Terms:")
-        for line in textwrap.wrap(terms, width=100):
-            if text.getY() < reserved_bottom:
-                text.textLine("...")
-                break
-            text.textLine(line)
-        pdf.drawText(text)
+    # PAY TO SECTION
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(20 * mm, y_top, "Pay To:")
+    y_top -= 6 * mm
 
-    if qr_data:
-        try:
-            qr_size = 28 * mm
-            qr_widget = QrCodeWidget(qr_data)
-            bounds = qr_widget.getBounds()
-            qr_width = bounds[2] - bounds[0]
-            qr_height = bounds[3] - bounds[1]
-            drawing = Drawing(qr_size, qr_size)
-            drawing.add(
-                qr_widget,
-                transform=[
-                    qr_size / qr_width,
-                    0,
-                    0,
-                    qr_size / qr_height,
-                    0,
-                    0,
-                ],
-            )
-            qr_x = width - 20 * mm - qr_size
-            qr_y = footer_y + 10 * mm
-            renderPDF.draw(drawing, pdf, qr_x, qr_y)
-        except Exception:
-            pass
+    pdf.setFont("Helvetica", 9)
+    if payment_details.get("account_no"):
+        pdf.drawString(20 * mm, y_top, f"Account No.: {payment_details.get('account_no')}")
+        y_top -= 5 * mm
+    if payment_details.get("ifsc"):
+        pdf.drawString(20 * mm, y_top, f"IFSC: {payment_details.get('ifsc')}")
+        y_top -= 5 * mm
+    if payment_details.get("pan"):
+        pdf.drawString(20 * mm, y_top, f"PAN: {payment_details.get('pan')}")
+        y_top -= 10 * mm
 
-    if payment_details:
-        pdf.setFont("Helvetica-Bold", 8)
-        pdf.drawString(20 * mm, reserved_bottom + 8 * mm, payment_label)
-        pdf.setFont("Helvetica", 8)
-        lines = []
-        if payment_details.get("upi_id"):
-            lines.append(f"UPI: {payment_details.get('upi_id')}")
-        if payment_details.get("bank_name"):
-            lines.append(f"Bank: {payment_details.get('bank_name')}")
-        if payment_details.get("account_no"):
-            lines.append(f"A/C: {payment_details.get('account_no')}")
-        if payment_details.get("ifsc"):
-            lines.append(f"IFSC: {payment_details.get('ifsc')}")
-        if payment_details.get("note"):
-            lines.append(str(payment_details.get("note")))
-        y = reserved_bottom + 4 * mm
-        for line in lines[:5]:
-            pdf.drawString(20 * mm, y, line)
-            y -= 4 * mm
+    # SIGNATURE (Option 4 — image above text)
+    if signature_reader:
+        sig_w = 40 * mm
+        sig_h = 15 * mm
+        pdf.drawImage(
+            signature_reader,
+            width - 60 * mm,
+            y_top,
+            sig_w,
+            sig_h,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+        y_top -= sig_h + 2 * mm
 
-    if signature_bytes:
-        try:
-            sig_reader = ImageReader(io.BytesIO(signature_bytes))
-            sig_width, sig_height = sig_reader.getSize()
-            max_width = 40 * mm
-            max_height = 15 * mm
-            scale = min(max_width / sig_width, max_height / sig_height)
-            render_width = sig_width * scale
-            render_height = sig_height * scale
-            pdf.drawImage(
-                sig_reader,
-                width - 60 * mm,
-                25 * mm,
-                render_width,
-                render_height,
-                preserveAspectRatio=True,
-                mask="auto",
-            )
-            pdf.setFont("Helvetica", 8)
-            pdf.drawString(width - 60 * mm, 20 * mm, "Authorized Signatory")
-        except Exception:
-            pass
-
-    pdf.setFont("Helvetica", 8)
-    pdf.drawString(20 * mm, footer_y, "Thank you for your business.")
+    pdf.setFont("Helvetica", 9)
+    pdf.drawRightString(width - 20 * mm, y_top, "Authorized Signature")
 
     pdf.showPage()
     pdf.save()
