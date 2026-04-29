@@ -837,9 +837,8 @@ def generate_customer_ledger_pdf(
     width, height = A4
 
     branding = branding or {}
-    brand_color = str(branding.get("brand_color", "#1F4E79")).strip() or "#1F4E79"
 
-    # Signature image (relative to this file)
+    # Load signature image
     signature_path = os.path.join(os.path.dirname(__file__), "aniketsign.png")
     signature_reader = None
     if os.path.exists(signature_path):
@@ -872,9 +871,7 @@ def generate_customer_ledger_pdf(
         total_received = float(pd.to_numeric(ledger_df.get("Amount_Received", 0), errors="coerce").fillna(0).sum())
         total_due = float(pd.to_numeric(ledger_df.get("Due", 0), errors="coerce").fillna(0).sum())
 
-    def _format_date(value: object) -> str:
-        if isinstance(value, (date, datetime)):
-            return pd.to_datetime(value).strftime("%d-%b-%Y")
+    def _format_date(value):
         parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
         return parsed.strftime("%d-%b-%Y") if not pd.isna(parsed) else str(value)
 
@@ -893,7 +890,7 @@ def generate_customer_ledger_pdf(
     # CUSTOMER DETAILS + SUMMARY SIDE BY SIDE
     y = height - 55 * mm
     left_x = 20 * mm
-    right_x = 125 * mm  # move summary clearly to the right
+    right_x = 135 * mm  # moved further right as requested
 
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(left_x, y, "Customer Details")
@@ -902,6 +899,7 @@ def generate_customer_ledger_pdf(
 
     pdf.setFont("Helvetica", 9)
 
+    # Customer details
     customer_name = str(customer_row.get("Name", "")).strip()
     customer_gst = str(customer_row.get("GST", "")).strip()
     customer_address = str(customer_row.get("Address", "")).strip()
@@ -919,6 +917,7 @@ def generate_customer_ledger_pdf(
         pdf.drawString(left_x, left_y, line)
         left_y -= 4 * mm
 
+    # Summary
     right_y = y
     pdf.drawString(right_x, right_y, f"Total Amount: {total_amount:,.2f}")
     right_y -= 5 * mm
@@ -949,26 +948,13 @@ def generate_customer_ledger_pdf(
         if w == 0:
             columns[i] = (label, available_width, align)
 
-    table_width = sum(w for _, w, _ in columns)
     table_left = left_x
     row_height = 6 * mm
-    bottom_limit = 60 * mm  # leave room for Pay To + signature
+    bottom_limit = 60 * mm
 
-    # Precompute column x positions for vertical borders
-    col_x_positions = [table_left]
-    acc = table_left
-    for _, w, _ in columns:
-        acc += w
-        col_x_positions.append(acc)
-
-    def _draw_table_header(y_pos: float) -> float:
+    # HEADER (no border)
+    def _draw_table_header(y_pos):
         pdf.setFont("Helvetica-Bold", 8)
-        # Header outer rect
-        pdf.rect(table_left, y_pos - 4 * mm, table_width, 6 * mm, stroke=1, fill=0)
-        # Vertical lines
-        for x_line in col_x_positions:
-            pdf.line(x_line, y_pos - 4 * mm, x_line, y_pos + 2 * mm)
-        # Text
         x = table_left
         for (label, w, align) in columns:
             if align == "right":
@@ -980,27 +966,28 @@ def generate_customer_ledger_pdf(
             x += w
         return y_pos - row_height
 
-    def _wrap_text(text: str, max_width: float) -> list[str]:
+    y = _draw_table_header(y)
+    pdf.setFont("Helvetica", 8)
+
+    # TEXT WRAPPING
+    def _wrap(text, max_width):
         if not text:
             return [""]
         words = text.split()
-        lines: list[str] = []
+        lines = []
         current = ""
         for w in words:
             test = (current + " " + w).strip()
             if pdfmetrics.stringWidth(test, "Helvetica", 8) <= max_width:
                 current = test
             else:
-                if current:
-                    lines.append(current)
+                lines.append(current)
                 current = w
         if current:
             lines.append(current)
-        return lines or [""]
+        return lines
 
-    y = _draw_table_header(y)
-    pdf.setFont("Helvetica", 8)
-
+    # TABLE ROWS (no borders)
     for _, row in ledger_df.iterrows():
         values = {
             "Date": _format_date(row.get("Date", "")),
@@ -1012,13 +999,12 @@ def generate_customer_ledger_pdf(
             "Balance": f"{safe_float(row.get('Running_Balance', row.get('Running Balance', 0))):,.2f}",
         }
 
-        # Wrap Reference + Description
-        wrapped: dict[str, list[str]] = {}
+        wrapped = {}
         max_lines = 1
         for (label, w, _) in columns:
             text = values[label]
             if label in ("Reference", "Description"):
-                lines = _wrap_text(text, w - 2 * mm)
+                lines = _wrap(text, w - 2 * mm)
             else:
                 lines = [text]
             wrapped[label] = lines
@@ -1026,26 +1012,12 @@ def generate_customer_ledger_pdf(
 
         total_row_height = max_lines * row_height
 
-        # Page break
         if y - total_row_height < bottom_limit:
             pdf.showPage()
-            # redraw header on new page
             y = height - 30 * mm
             y = _draw_table_header(y)
             pdf.setFont("Helvetica", 8)
 
-        # Draw row outer rect
-        top_y = y
-        bottom_y = y - total_row_height
-        pdf.rect(table_left, bottom_y, table_width, total_row_height, stroke=1, fill=0)
-
-        # Vertical column lines for this row
-        for x_line in col_x_positions:
-            pdf.line(x_line, bottom_y, x_line, top_y)
-
-        # Horizontal internal lines (between wrapped lines)
-        # (optional; here we keep only outer row box, grid is by columns+rows)
-        # Draw text line by line
         for line_idx in range(max_lines):
             line_y = y - line_idx * row_height
             x = table_left
@@ -1059,9 +1031,10 @@ def generate_customer_ledger_pdf(
                 else:
                     pdf.drawString(x + 1 * mm, line_y, text)
                 x += w
+
         y -= total_row_height
 
-    # PAY TO SECTION (immediately after table)
+    # PAY TO SECTION
     y -= 10 * mm
     pdf.setFont("Helvetica-Bold", 10)
     pdf.drawString(left_x, y, "Pay To:")
@@ -1079,7 +1052,7 @@ def generate_customer_ledger_pdf(
     pdf.drawString(left_x, y, "** GST SUBJECT TO NON REVERSE CHARGE BASIS")
     y -= 10 * mm
 
-    # SIGNATURE (right aligned)
+    # SIGNATURE
     if signature_reader:
         sig_w = 40 * mm
         sig_h = 15 * mm
@@ -1101,6 +1074,7 @@ def generate_customer_ledger_pdf(
     pdf.save()
     buffer.seek(0)
     return buffer.read()
+
 
 
 
