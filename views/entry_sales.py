@@ -523,7 +523,7 @@ def _build_customer_ledger(
     )
 
     ledger_df = pd.concat([sales_events, payment_events], ignore_index=True)
-    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce")
+    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce", dayfirst=True)
     ledger_df["_type_order"] = ledger_df["Type"].map({"Sale": 0, "Payment": 1}).fillna(2)
     ledger_df = ledger_df.sort_values(
         ["_sort_date", "_type_order", "Reference"],
@@ -686,7 +686,7 @@ def _ledger_events(
         )
 
     ledger_df = pd.DataFrame(events)
-    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce")
+    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce", dayfirst=True)
     ledger_df["_sort_date"] = ledger_df["_sort_date"].fillna(pd.Timestamp.max)
     ledger_df["Reference"] = ledger_df["Reference"].astype(str)
     ledger_df = ledger_df.sort_values(
