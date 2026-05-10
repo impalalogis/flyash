@@ -741,11 +741,7 @@ def generate_invoice_pdf(
         sale_row.get("Total_Amount", adjusted_amount + gst_amount)
     )
     received = safe_float(sale_row.get("Amount_Received", 0))
-    dues_value = sale_row.get("Dues", sale_row.get("Due"))
-    if dues_value is not None and str(dues_value).strip() != "":
-        due = safe_float(dues_value)
-    else:
-        due = total - received
+    due = total - received
 
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, y, "Fly-ash bricks")

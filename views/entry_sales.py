@@ -287,6 +287,15 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
             sales_df[column] = ""
     sales_df = _round_up_sales_values(sales_df)
     sales_df = _apply_adjusted_columns(sales_df)
+    sales_df["Total_Amount"] = utils.to_numeric_series(
+        sales_df.get("Total_Amount", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Amount_Received"] = utils.to_numeric_series(
+        sales_df.get("Amount_Received", pd.Series(dtype=float))
+    ).fillna(0.0)
+    sales_df["Dues"] = utils.round_up_2(
+        sales_df["Total_Amount"] - sales_df["Amount_Received"]
+    )
     customer_map = (
         customers_df.set_index("Customer_ID")
         .get("Name", pd.Series(dtype=str))
@@ -460,10 +469,12 @@ def _build_customer_ledger(
 
     sales_dates = utils.parse_date_series(
         sales_df.get("Date", pd.Series(dtype=str)),
+        dayfirst=True,
         month_hint=sales_df["Month"] if "Month" in sales_df.columns else None,
     )
     payment_dates = utils.parse_date_series(
         payments_df.get("Date", pd.Series(dtype=str)),
+        dayfirst=True,
     )
     invoice_map: dict[str, str] = {}
     for _, sale_row in sales_df.iterrows():
@@ -476,9 +487,13 @@ def _build_customer_ledger(
             invoice_map[original] = canonical
         invoice_map[canonical] = canonical
 
+    sales_date_display = sales_df.get("Date", pd.Series(dtype=str)).astype(str).replace("NaT", "")
+    payment_date_display = payments_df.get("Date", pd.Series(dtype=str)).astype(str).replace("NaT", "")
+
     sales_events = pd.DataFrame(
         {
             "Date": sales_dates.dt.date,
+            "Date_Display": sales_date_display,
             "Type": "Sale",
             "Reference": sales_df.get("Updated_Invoice_No", pd.Series(dtype=str))
             .astype(str)
@@ -510,6 +525,7 @@ def _build_customer_ledger(
     payment_events = pd.DataFrame(
         {
             "Date": payment_dates.dt.date,
+            "Date_Display": payment_date_display,
             "Type": "Payment",
             "Reference": payment_refs,
             "Description": payments_df.apply(
@@ -1406,7 +1422,7 @@ def render() -> None:
 
                 ledger_view = ledger_filtered[
                     [
-                        "Date",
+                        "Date_Display",
                         "Type",
                         "Reference",
                         "Description",
@@ -1414,7 +1430,7 @@ def render() -> None:
                         "Credit",
                         "Running_Balance",
                     ]
-                ].rename(columns={"Running_Balance": "Running Balance"})
+                ].rename(columns={"Date_Display": "Date", "Running_Balance": "Running Balance"})
                 st.dataframe(ledger_view, width="stretch")
 
                 file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
@@ -1452,7 +1468,7 @@ def render() -> None:
                 period_label = f"{actual_start:%d-%b-%Y} to {actual_end:%d-%b-%Y}"
                 pdf_rows = ledger_filtered[
                     [
-                        "Date",
+                        "Date_Display",
                         "Type",
                         "Reference",
                         "Description",
@@ -1460,7 +1476,7 @@ def render() -> None:
                         "Credit",
                         "Running_Balance",
                     ]
-                ].rename(columns={"Running_Balance": "Running_Balance"}).copy()
+                ].rename(columns={"Date_Display": "Date", "Running_Balance": "Running_Balance"}).copy()
                 pdf_bytes = utils.generate_customer_ledger_pdf(
                     pdf_rows,
                     customer_row,
