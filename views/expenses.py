@@ -92,7 +92,7 @@ def _to_iso_date(value: object) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
+    parsed = pd.to_datetime(text, errors="coerce", format="%m-%d-%Y")
     if pd.isna(parsed):
         return None
     return parsed.date().isoformat()

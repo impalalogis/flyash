@@ -884,7 +884,7 @@ def render() -> None:
             )
             sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
             fiscal_label = _fy_label_short(sale_date)
-            due_amount = utils.round_up_2(total_amount - amount_received)
+            due_amount = utils.round_up_2(total_amount)
             existing_invoices = (
                 entries.get("Invoice_No", pd.Series(dtype=str))
                 .astype(str)
