@@ -187,7 +187,7 @@ def _month_hint_number(value: object) -> int | None:
 def parse_date_series(
     series: pd.Series,
     *,
-    dayfirst: bool = True,
+    dayfirst: bool = False,
     month_hint: pd.Series | None = None,
 ) -> pd.Series:
     parsed_dayfirst = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst)

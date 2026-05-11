@@ -870,8 +870,6 @@ def render() -> None:
             errors.append("Sale rate must be greater than 0.")
         if rate < 0:
             errors.append("Calculated rate cannot be negative. Check freight rate.")
-        if amount_received > total_amount:
-            errors.append("Amount Received cannot exceed Total Amount.")
 
         if errors:
             for error in errors:
