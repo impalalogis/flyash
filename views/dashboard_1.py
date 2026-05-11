@@ -51,7 +51,7 @@ def render() -> None:
     sales = utils.coerce_numeric_columns(
         sales,
         [
-            "No_of_Bricks",
+            "Qty",
             "Rate",
             "GST",
             "Gst (%12)",
@@ -108,7 +108,7 @@ def render() -> None:
         sales,
         "Date",
         [
-            ("No_of_Bricks", "No_of_Bricks"),
+            ("Qty", "Qty"),
             ("Amount", "Amount"),
             ("Amount_Received", "Amount_Received"),
         ],
@@ -265,7 +265,7 @@ def render() -> None:
                 "Amount",
                 "Amount_Received",
                 "Total_Amount",
-                "No_of_Bricks",
+                "Qty",
                 "GST",
                 "Gst (%12)",
                 "Dues",

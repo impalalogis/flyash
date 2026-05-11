@@ -16,27 +16,21 @@ SALES_COLUMNS = [
     "Sales_ID",
     "Date",
     "Fiscal",
-    "Fiscal Year",
-    "Fiscal_Year",
     "Year",
     "Month",
     "Customer_ID",
     "Customer_Name",
     "Destination",
-    "No_of_Bricks",
-    "Sale_rate",
+    "Product",
+    "HSN Code",
+    "Qty",
     "Sale rate",
-    "Sale_Rate",
     "Rate",
-    "GST",
-    "Gst (%12)",
     "GST(%12)",
     "Adjusted_Rate",
     "Adjusted_Amount",
     "Amount",
     "Freight_rate",
-    "Freight rate",
-    "Freight_Rate",
     "Freight",
     "Transport_Party",
     "Total_Amount",
@@ -48,8 +42,8 @@ SALES_COLUMNS = [
     "Payment_Date",
     "Payment_ID",
     "Dues",
+    "old_Invoice_No",
     "Invoice_No",
-    "Updated_Invoice_No",
 ]
 
 SHOW_SALES_RECORDS = False
@@ -57,19 +51,13 @@ SHOW_VALIDATION = False
 GST_RATE = 12.0
 GST_FACTOR = 1 + (GST_RATE / 100)
 ROUND_UP_COLUMNS = [
-    "Sale_rate",
     "Sale rate",
-    "Sale_Rate",
     "Rate",
-    "GST",
-    "Gst (%12)",
     "GST(%12)",
     "Adjusted_Rate",
     "Adjusted_Amount",
     "Amount",
     "Freight_rate",
-    "Freight rate",
-    "Freight_Rate",
     "Freight",
     "Total_Amount",
     "Adjusted_Total_amount",
@@ -91,7 +79,7 @@ def _sale_rate_components(sale_rate: float, freight_rate: float) -> tuple[float,
 
 
 def _sales_values_from_rates(
-    no_of_bricks: float,
+    qty: float,
     *,
     sale_rate: float,
     freight_rate: float,
@@ -104,17 +92,17 @@ def _sales_values_from_rates(
         rate_ex_freight, gst_per_brick, _ = _sale_rate_components(
             sale_rate_value, freight_rate_value
         )
-        amount = no_of_bricks * rate_ex_freight
-        gst_amount = no_of_bricks * gst_per_brick
-        freight_total = no_of_bricks * freight_rate_value
+        amount = qty * rate_ex_freight
+        gst_amount = qty * gst_per_brick
+        freight_total = qty * freight_rate_value
         total_amount = amount + gst_amount + freight_total
         return rate_ex_freight, gst_amount, amount, freight_total, total_amount
 
     rate_value = utils.safe_float(rate, 0.0)
     freight_total = utils.safe_float(freight, 0.0)
     if freight_total <= 0 and freight_rate_value > 0:
-        freight_total = no_of_bricks * freight_rate_value
-    amount = no_of_bricks * rate_value
+        freight_total = qty * freight_rate_value
+    amount = qty * rate_value
     gst_amount = amount * GST_RATE / 100
     total_amount = amount + freight_total
     return rate_value, gst_amount, amount, freight_total, total_amount
@@ -233,7 +221,7 @@ def _apply_adjusted_columns(sales_df: pd.DataFrame) -> pd.DataFrame:
             sales_df[column] = ""
 
     empty = pd.Series("", index=sales_df.index, dtype=object)
-    bricks = utils.to_numeric_series(sales_df.get("No_of_Bricks", empty)).fillna(0.0)
+    bricks = utils.to_numeric_series(sales_df.get("Qty", empty)).fillna(0.0)
     amount = utils.to_numeric_series(sales_df.get("Amount", empty)).fillna(0.0)
     freight = utils.to_numeric_series(sales_df.get("Freight", empty)).fillna(0.0)
     gst_source = sales_df.get("GST(%12)")
@@ -287,14 +275,14 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
             sales_df[column] = ""
     sales_df = _round_up_sales_values(sales_df)
     sales_df = _apply_adjusted_columns(sales_df)
-    sales_df["Total_Amount"] = utils.to_numeric_series(
-        sales_df.get("Total_Amount", pd.Series(dtype=float))
+    sales_df["Adjusted_Total_amount"] = utils.to_numeric_series(
+        sales_df.get("Adjusted_Total_amount", pd.Series(dtype=float))
     ).fillna(0.0)
     sales_df["Amount_Received"] = utils.to_numeric_series(
         sales_df.get("Amount_Received", pd.Series(dtype=float))
     ).fillna(0.0)
     sales_df["Dues"] = utils.round_up_2(
-        sales_df["Total_Amount"] - sales_df["Amount_Received"]
+        sales_df["Adjusted_Total_amount"] - sales_df["Amount_Received"]
     )
     customer_map = (
         customers_df.set_index("Customer_ID")
@@ -309,7 +297,7 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
     sales_df["Customer_Name"] = sales_df["Customer_ID"].map(
         lambda customer_id: customer_map.get(customer_id, "")
     )
-    sales_df["Updated_Invoice_No"] = _updated_invoice_series(sales_df)
+    sales_df["Invoice_No"] = _updated_invoice_series(sales_df)
     return sales_df
 
 
@@ -353,7 +341,8 @@ def _payment_applied_amount(row: pd.Series) -> float:
 
 def _sale_description(row: pd.Series) -> str:
     destination = str(row.get("Destination", "")).strip()
-    bricks = utils.safe_float(row.get("No_of_Bricks", 0.0))
+    product = str(row.get("Product", "fly-ash bricks")).strip() or "fly-ash bricks"
+    bricks = utils.safe_float(row.get("Qty", 0.0))
     amount = utils.safe_float(row.get("Amount", 0.0))
     freight = utils.safe_float(row.get("Freight", 0.0))
     adjusted_rate = utils.safe_float(row.get("Adjusted_Rate", 0.0))
@@ -368,8 +357,9 @@ def _sale_description(row: pd.Series) -> str:
     total = utils.safe_float(
         row.get("Adjusted_Total_amount", row.get("Total_Amount", 0.0))
     )
+    hsn_code = str(row.get("HSN Code", "")).strip() or "6815"
     breakdown = (
-        f"Fly-ash bricks | Qty {bricks:,.0f}, Rate {adjusted_rate:,.2f}, "
+        f"{product} (HSN: {hsn_code}) | Qty {bricks:,.0f}, Rate {adjusted_rate:,.2f}, "
         f"Amount {adjusted_amount:,.2f}, GST {gst:,.2f}, Total {total:,.2f}"
     )
     if destination:
@@ -409,19 +399,19 @@ def _build_customer_ledger(
             "Month",
             "Customer_ID",
             "Destination",
-            "No_of_Bricks",
+            "Product",
+            "HSN Code",
+            "Qty",
             "Rate",
             "Amount",
             "Freight",
-            "GST",
-            "Gst (%12)",
             "GST(%12)",
             "Adjusted_Rate",
             "Adjusted_Amount",
             "Total_Amount",
             "Adjusted_Total_amount",
+            "old_Invoice_No",
             "Invoice_No",
-            "Updated_Invoice_No",
         ],
     ).copy()
     payments_df = utils.ensure_columns(
@@ -478,8 +468,8 @@ def _build_customer_ledger(
     )
     invoice_map: dict[str, str] = {}
     for _, sale_row in sales_df.iterrows():
-        original = str(sale_row.get("Invoice_No", "")).strip()
-        updated = str(sale_row.get("Updated_Invoice_No", "")).strip()
+        original = str(sale_row.get("old_Invoice_No", "")).strip()
+        updated = str(sale_row.get("Invoice_No", "")).strip()
         canonical = updated or original
         if not canonical:
             continue
@@ -495,17 +485,17 @@ def _build_customer_ledger(
             "Date": sales_dates.dt.date,
             "Date_Display": sales_date_display,
             "Type": "Sale",
-            "Reference": sales_df.get("Updated_Invoice_No", pd.Series(dtype=str))
+            "Reference": sales_df.get("Invoice_No", pd.Series(dtype=str))
             .astype(str)
             .str.strip()
             .where(
-                sales_df.get("Updated_Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
+                sales_df.get("Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
                 != "",
-                sales_df.get("Invoice_No", pd.Series(dtype=str))
+                sales_df.get("old_Invoice_No", pd.Series(dtype=str))
                 .astype(str)
                 .str.strip()
                 .where(
-                    sales_df.get("Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
+                    sales_df.get("old_Invoice_No", pd.Series(dtype=str)).astype(str).str.strip()
                     != "",
                     sales_df.get("Sales_ID", pd.Series(dtype=str)).astype(str),
                 ),
@@ -573,17 +563,17 @@ def _ledger_events(
             "Destination",
             "Total_Amount",
             "Adjusted_Total_amount",
+            "old_Invoice_No",
             "Invoice_No",
-            "Updated_Invoice_No",
-            "No_of_Bricks",
+            "Qty",
             "Rate",
             "Adjusted_Rate",
             "Amount",
             "Adjusted_Amount",
             "Freight",
-            "GST",
-            "Gst (%12)",
             "GST(%12)",
+            "HSN Code",
+            "Product",
         ],
     ).copy()
     payments_df = utils.ensure_columns(
@@ -821,7 +811,7 @@ def render() -> None:
             customer_label = st.selectbox("Customer", list(customer_labels.keys()))
             customer_id = customer_labels[customer_label]
             destination = st.text_input("Destination")
-            no_of_bricks = st.number_input("No of Bricks", min_value=0, step=1)
+            qty = st.number_input("Qty", min_value=0, step=1)
             sale_rate = st.number_input("Sale rate (per brick)", min_value=0.0, step=1.0)
         with col2:
             st.text_input("GST (%)", value=f"{GST_RATE:.0f}", disabled=True)
@@ -854,7 +844,7 @@ def render() -> None:
             invoice_no = st.text_input("Invoice No (optional, next GST sequence only)")
 
         rate, gst_amount, amount, freight, total_amount = _sales_values_from_rates(
-            no_of_bricks,
+            qty,
             sale_rate=sale_rate,
             freight_rate=freight_rate,
             rate=0.0,
@@ -873,7 +863,7 @@ def render() -> None:
 
     if submitted:
         errors = []
-        if no_of_bricks <= 0:
+        if qty <= 0:
             errors.append("No of Bricks must be greater than 0.")
         if sale_rate <= 0:
             errors.append("Sale rate must be greater than 0.")
@@ -931,29 +921,23 @@ def render() -> None:
                     "Sales_ID": sales_id,
                     "Date": sale_date.isoformat(),
                     "Fiscal": fiscal_label,
-                    "Fiscal Year": fiscal_label,
-                    "Fiscal_Year": fiscal_label,
                     "Year": sale_date.strftime("%Y"),
                     "Month": utils.to_month_string(sale_date),
                     "Customer_ID": customer_id,
                     "Customer_Name": customer_name_value,
                     "Destination": destination,
-                    "No_of_Bricks": no_of_bricks,
-                    "Sale_rate": utils.round_up_2(sale_rate),
+                    "Product": "fly-ash bricks",
+                    "HSN Code": "6815",
+                    "Qty": qty,
                     "Sale rate": utils.round_up_2(sale_rate),
-                    "Sale_Rate": utils.round_up_2(sale_rate),
                     "Rate": utils.round_up_2(rate),
-                    "GST": utils.round_up_2(gst_amount),
-                    "Gst (%12)": utils.round_up_2(gst_amount),
                     "GST(%12)": utils.round_up_2(gst_amount),
                     "Adjusted_Rate": utils.round_up_2(
-                        (amount + freight) / no_of_bricks if no_of_bricks > 0 else 0.0
+                        (amount + freight) / qty if qty > 0 else 0.0
                     ),
                     "Adjusted_Amount": utils.round_up_2(amount + freight),
                     "Amount": utils.round_up_2(amount),
                     "Freight_rate": utils.round_up_2(freight_rate),
-                    "Freight rate": utils.round_up_2(freight_rate),
-                    "Freight_Rate": utils.round_up_2(freight_rate),
                     "Freight": utils.round_up_2(freight),
                     "Transport_Party": transport_party,
                     "Total_Amount": utils.round_up_2(total_amount),
@@ -965,8 +949,8 @@ def render() -> None:
                     "Payment_Date": payment_date.isoformat(),
                     "Payment_ID": "",
                     "Dues": utils.round_up_2(total_amount - amount_received),
+                    "old_Invoice_No": invoice_no_final,
                     "Invoice_No": invoice_no_final,
-                    "Updated_Invoice_No": invoice_no_final,
                 }
                 data = {key: data.get(key, "") for key in SALES_COLUMNS}
                 database.insert_row("Sales_Log", data)
@@ -996,13 +980,9 @@ def render() -> None:
 
     if has_entries:
         numeric_columns = [
-            "No_of_Bricks",
-            "Sale_rate",
+            "Qty",
             "Sale rate",
-            "Sale_Rate",
             "Rate",
-            "GST",
-            "Gst (%12)",
             "GST(%12)",
             "Adjusted_Rate",
             "Adjusted_Amount",
@@ -1497,18 +1477,12 @@ def render() -> None:
         rules = {
             "Date": {"required": True},
             "Customer_ID": {"required": True},
-            "No_of_Bricks": {"numeric": True, "min": 0},
-            "Sale_rate": {"numeric": True, "min": 0},
+            "Qty": {"numeric": True, "min": 0},
             "Sale rate": {"numeric": True, "min": 0},
-            "Sale_Rate": {"numeric": True, "min": 0},
             "Rate": {"numeric": True, "min": 0},
-            "GST": {"numeric": True, "min": 0},
-            "Gst (%12)": {"numeric": True, "min": 0},
             "GST(%12)": {"numeric": True, "min": 0},
             "Amount": {"numeric": True, "min": 0},
             "Freight_rate": {"numeric": True, "min": 0},
-            "Freight rate": {"numeric": True, "min": 0},
-            "Freight_Rate": {"numeric": True, "min": 0},
             "Freight": {"numeric": True, "min": 0},
             "Total_Amount": {"numeric": True, "min": 0},
             "Amount_Received": {"numeric": True, "min": 0},
@@ -1516,7 +1490,7 @@ def render() -> None:
         if "Dues" in entries.columns:
             rules["Dues"] = {"numeric": True}
         mask, errors = utils.build_validation_mask(entries, rules)
-        bricks = pd.to_numeric(entries.get("No_of_Bricks", pd.Series(dtype=float)), errors="coerce")
+        bricks = pd.to_numeric(entries.get("Qty", pd.Series(dtype=float)), errors="coerce")
         rate_val = pd.to_numeric(entries.get("Rate", pd.Series(dtype=float)), errors="coerce")
         sale_rate_series = pd.Series(dtype=float)
         for key in ["Sale_rate", "Sale rate", "Sale_Rate"]:
@@ -1624,7 +1598,7 @@ def render() -> None:
                     old_due = old_total - old_received
 
                     new_customer = str(row.get("Customer_ID", "")).strip()
-                    bricks_val = utils.safe_float(row.get("No_of_Bricks", 0))
+                    bricks_val = utils.safe_float(row.get("Qty", 0))
                     sale_rate_new = utils.safe_float(
                         _pick_value(row, ["Sale_rate", "Sale rate", "Sale_Rate"]), 0.0
                     )

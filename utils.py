@@ -724,7 +724,7 @@ def generate_invoice_pdf(
     y -= 6 * mm
 
     # VALUES
-    qty = safe_float(sale_row.get("No_of_Bricks", 0))
+    qty = safe_float(sale_row.get("Qty", 0))
     raw_amount = safe_float(sale_row.get("Amount", 0))
     raw_freight = safe_float(sale_row.get("Freight", 0))
     adjusted_rate = safe_float(sale_row.get("Adjusted_Rate", 0))
