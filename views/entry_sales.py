@@ -287,12 +287,18 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
         sales_df.get("Amount_Received", pd.Series(dtype=float))
     ).fillna(0.0)
     # Calculate Dues for new entries (where Dues is empty)
-    existing_dues = sales_df.get("Dues", pd.Series(dtype=str)).astype(str).str.strip()
-    is_new_entry = (existing_dues == "") | (existing_dues.isna())
-    calculated_dues = utils.round_up_2(
-        sales_df["Adjusted_Total_amount"] - sales_df["Amount_Received"]
-    )
-    sales_df["Dues"] = calculated_dues.where(is_new_entry, existing_dues)
+    existing_dues_str = sales_df.get("Dues", pd.Series(dtype=str)).astype(str).str.strip()
+    is_new_entry = (existing_dues_str == "") | (existing_dues_str.isna())
+    
+    # Calculate dues as numeric Series
+    dues_calc = sales_df["Adjusted_Total_amount"] - sales_df["Amount_Received"]
+    dues_calc = dues_calc.apply(lambda x: utils.round_up_2(x))
+    
+    # Convert existing string dues to numeric
+    existing_dues_numeric = pd.to_numeric(existing_dues_str, errors='coerce').fillna(0.0)
+    
+    # Use where - where is_new_entry is True, use calculated, else use existing
+    sales_df["Dues"] = dues_calc.where(is_new_entry, existing_dues_numeric)
     customer_map = (
         customers_df.set_index("Customer_ID")
         .get("Name", pd.Series(dtype=str))
