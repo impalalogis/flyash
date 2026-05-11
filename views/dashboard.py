@@ -38,7 +38,7 @@ def _add_period_column(data_frame: pd.DataFrame, column: str, period: str) -> pd
     freq = {"Monthly": "M", "Quarterly": "Q", "Yearly": "Y"}[period]
     data_frame = data_frame.copy()
     dt = pd.to_datetime(data_frame[column], errors="coerce", dayfirst=True)
-    data_frame["Period"] = dt.dt.to_period(freq).astype(str)
+    data_frame["Period"] = dt.dt.to_period(freq).astype('string')
     data_frame = data_frame[data_frame["Period"] != "NaT"]
     return data_frame
 

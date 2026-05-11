@@ -940,12 +940,11 @@ def generate_customer_ledger_pdf(
     columns = [
         ("Date", 18 * mm, "left"),
         ("Type", 16 * mm, "center"),
-        ("HSN Code", 16 * mm, "center"),
+        ("Description", 0, "left"),  # auto-expand
         ("Reference", 28 * mm, "left"),
         ("Debit", 18 * mm, "right"),
         ("Credit", 18 * mm, "right"),
         ("Balance", 20 * mm, "right"),
-        ("Description", 0, "left"),  # auto-expand last
     ]
 
     fixed_width = sum(w for _, w, _ in columns if w > 0)
@@ -998,7 +997,6 @@ def generate_customer_ledger_pdf(
         values = {
             "Date": _format_date(row.get("Date", "")),
             "Type": str(row.get("Type", "")).strip(),
-            "HSN Code": str(row.get("HSN Code", "")).strip(),
             "Reference": str(row.get("Reference", "")).strip(),
             "Description": str(row.get("Description", "")).strip(),
             "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
