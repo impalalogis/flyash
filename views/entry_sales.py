@@ -286,9 +286,13 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
     sales_df["Amount_Received"] = utils.to_numeric_series(
         sales_df.get("Amount_Received", pd.Series(dtype=float))
     ).fillna(0.0)
-    sales_df["Dues"] = utils.round_up_2(
+    # Calculate Dues for new entries (where Dues is empty)
+    existing_dues = sales_df.get("Dues", pd.Series(dtype=str)).astype(str).str.strip()
+    is_new_entry = (existing_dues == "") | (existing_dues.isna())
+    calculated_dues = utils.round_up_2(
         sales_df["Adjusted_Total_amount"] - sales_df["Amount_Received"]
     )
+    sales_df["Dues"] = calculated_dues.where(is_new_entry, existing_dues)
     customer_map = (
         customers_df.set_index("Customer_ID")
         .get("Name", pd.Series(dtype=str))
@@ -312,7 +316,7 @@ def _sync_sales_log_rules(customers_df: pd.DataFrame) -> None:
         return
     updated_df = _apply_sales_log_rules(sales_df, customers_df)
     current_df = utils.ensure_columns(sales_df, updated_df.columns.tolist())
-    compare_columns = updated_df.columns.tolist()
+    compare_columns = [c for c in updated_df.columns.tolist() if c != "Dues"]  # Exclude Dues from sync
     has_changes = False
     for column in compare_columns:
         current_col = current_df[column] if column in current_df.columns else pd.Series("", index=updated_df.index)
@@ -333,6 +337,9 @@ def _sync_sales_log_rules(customers_df: pd.DataFrame) -> None:
             has_changes = True
             break
     if has_changes:
+        # Preserve Dues from current database
+        if "Dues" in current_df.columns:
+            updated_df["Dues"] = current_df["Dues"]
         database.replace_table("Sales_Log", updated_df, recompute_stock=False)
 
 
