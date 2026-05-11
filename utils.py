@@ -715,12 +715,13 @@ def generate_invoice_pdf(
     # DESCRIPTION TABLE
     pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(20 * mm, y, "Description")
-    pdf.drawRightString(120 * mm, y, "Qty")
-    pdf.drawRightString(150 * mm, y, "Rate")
-    pdf.drawRightString(190 * mm, y, "Amount")
+    pdf.drawRightString(85 * mm, y, "HSN Code")
+    pdf.drawRightString(115 * mm, y, "Qty")
+    pdf.drawRightString(145 * mm, y, "Rate")
+    pdf.drawRightString(175 * mm, y, "Amount")
     y -= 5 * mm
 
-    pdf.line(20 * mm, y, 190 * mm, y)
+    pdf.line(20 * mm, y, 175 * mm, y)
     y -= 6 * mm
 
     # VALUES
@@ -743,30 +744,34 @@ def generate_invoice_pdf(
     received = safe_float(sale_row.get("Amount_Received", 0))
     due = total - received
 
+    product = str(sale_row.get("Product", "fly-ash bricks")).strip() or "fly-ash bricks"
+    hsn_code = str(sale_row.get("HSN Code", "")).strip()
+
     pdf.setFont("Helvetica", 9)
-    pdf.drawString(20 * mm, y, "Fly-ash bricks")
-    pdf.drawRightString(120 * mm, y, f"{qty:,.0f}")
-    pdf.drawRightString(150 * mm, y, f"{adjusted_rate:,.2f}")
-    pdf.drawRightString(190 * mm, y, f"{adjusted_amount:,.2f}")
+    pdf.drawString(20 * mm, y, product)
+    pdf.drawRightString(85 * mm, y, hsn_code)
+    pdf.drawRightString(115 * mm, y, f"{qty:,.0f}")
+    pdf.drawRightString(145 * mm, y, f"{adjusted_rate:,.2f}")
+    pdf.drawRightString(175 * mm, y, f"{adjusted_amount:,.2f}")
     y -= 6 * mm
 
     pdf.drawString(20 * mm, y, "GST (12%)")
-    pdf.drawRightString(190 * mm, y, f"{gst_amount:,.2f}")
+    pdf.drawRightString(175 * mm, y, f"{gst_amount:,.2f}")
     y -= 6 * mm
 
     pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(20 * mm, y, "Total")
-    pdf.drawRightString(190 * mm, y, f"{total:,.2f}")
+    pdf.drawRightString(175 * mm, y, f"{total:,.2f}")
     y -= 6 * mm
 
     pdf.setFont("Helvetica", 9)
     pdf.drawString(20 * mm, y, "Amount Received")
-    pdf.drawRightString(190 * mm, y, f"{received:,.2f}")
+    pdf.drawRightString(175 * mm, y, f"{received:,.2f}")
     y -= 6 * mm
 
     pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(20 * mm, y, "Balance Due")
-    pdf.drawRightString(190 * mm, y, f"{due:,.2f}")
+    pdf.drawRightString(175 * mm, y, f"{due:,.2f}")
     y -= 15 * mm
 
     # PAY TO — Option A (replaced)
@@ -935,11 +940,12 @@ def generate_customer_ledger_pdf(
     columns = [
         ("Date", 18 * mm, "left"),
         ("Type", 16 * mm, "center"),
+        ("HSN Code", 16 * mm, "center"),
         ("Reference", 28 * mm, "left"),
-        ("Description", 0, "left"),  # auto-expand
         ("Debit", 18 * mm, "right"),
         ("Credit", 18 * mm, "right"),
         ("Balance", 20 * mm, "right"),
+        ("Description", 0, "left"),  # auto-expand last
     ]
 
     fixed_width = sum(w for _, w, _ in columns if w > 0)
@@ -992,6 +998,7 @@ def generate_customer_ledger_pdf(
         values = {
             "Date": _format_date(row.get("Date", "")),
             "Type": str(row.get("Type", "")).strip(),
+            "HSN Code": str(row.get("HSN Code", "")).strip(),
             "Reference": str(row.get("Reference", "")).strip(),
             "Description": str(row.get("Description", "")).strip(),
             "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",

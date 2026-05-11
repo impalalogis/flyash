@@ -50,6 +50,11 @@ SHOW_SALES_RECORDS = False
 SHOW_VALIDATION = False
 GST_RATE = 12.0
 GST_FACTOR = 1 + (GST_RATE / 100)
+PRODUCT_HSN_MAP = {
+    "fly-ash bricks": "6815",
+    "paver blocks": "6810",  # Assuming a code, can be updated
+    "concrete blocks": "6810",  # Assuming
+}
 ROUND_UP_COLUMNS = [
     "Sale rate",
     "Rate",
@@ -501,6 +506,7 @@ def _build_customer_ledger(
                 ),
             ),
             "Description": sales_df.apply(_sale_description, axis=1),
+            "HSN Code": sales_df.get("HSN Code", pd.Series(dtype=str)).astype(str).str.strip(),
             "Debit": sales_df["Adjusted_Total_amount"].where(
                 sales_df["Adjusted_Total_amount"] > 0,
                 sales_df["Total_Amount"],
@@ -522,6 +528,7 @@ def _build_customer_ledger(
                 lambda payment_row: _payment_description(payment_row, invoice_map),
                 axis=1,
             ),
+            "HSN Code": "",
             "Debit": 0.0,
             "Credit": payments_df["Amount_Paid"],
             "_applied": applied_amounts,
@@ -805,12 +812,14 @@ def render() -> None:
     has_payment_defaults = any(payment_defaults.values())
 
     with st.form("sales_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             sale_date = st.date_input("Date", value=date.today())
             customer_label = st.selectbox("Customer", list(customer_labels.keys()))
             customer_id = customer_labels[customer_label]
             destination = st.text_input("Destination")
+            product = st.selectbox("Product", list(PRODUCT_HSN_MAP.keys()))
+            st.text(f"HSN Code: {PRODUCT_HSN_MAP.get(product, '6815')}")
             qty = st.number_input("Qty", min_value=0, step=1)
             sale_rate = st.number_input("Sale rate (per brick)", min_value=0.0, step=1.0)
         with col2:
@@ -833,14 +842,6 @@ def render() -> None:
             transport_party = st.text_input("Transport Party")
             freight_paid = st.selectbox("Freight Paid", ["No", "Yes"], index=0)
             freight_paid_by = st.selectbox("Freight Paid By", ["Party", "Company"], index=0)
-        with col3:
-            amount_received = st.number_input("Amount Received", min_value=0.0, step=1.0)
-            payment_mode = st.selectbox(
-                "Payment Mode",
-                ["Cash", "UPI", "Bank Transfer", "Cheque", "Other"],
-                index=0,
-            )
-            payment_date = st.date_input("Payment Date", value=sale_date)
             invoice_no = st.text_input("Invoice No (optional, next GST sequence only)")
 
         rate, gst_amount, amount, freight, total_amount = _sales_values_from_rates(
@@ -850,7 +851,7 @@ def render() -> None:
             rate=0.0,
             freight=0.0,
         )
-        due_display = total_amount - amount_received
+        due_display = total_amount
 
         st.markdown("**Calculated Totals**")
         st.write(f"Amount: {amount:,.2f}")
@@ -926,8 +927,8 @@ def render() -> None:
                     "Customer_ID": customer_id,
                     "Customer_Name": customer_name_value,
                     "Destination": destination,
-                    "Product": "fly-ash bricks",
-                    "HSN Code": "6815",
+                    "Product": product,
+                    "HSN Code": PRODUCT_HSN_MAP.get(product, "6815"),
                     "Qty": qty,
                     "Sale rate": utils.round_up_2(sale_rate),
                     "Rate": utils.round_up_2(rate),
@@ -944,11 +945,11 @@ def render() -> None:
                     "Adjusted_Total_amount": utils.round_up_2(total_amount),
                     "Freight_Paid": freight_paid,
                     "Freight_Paid_By": freight_paid_by,
-                    "Amount_Received": utils.round_up_2(amount_received),
-                    "Payment_Mode": payment_mode,
-                    "Payment_Date": payment_date.isoformat(),
+                    "Amount_Received": 0.0,
+                    "Payment_Mode": "",
+                    "Payment_Date": "",
                     "Payment_ID": "",
-                    "Dues": utils.round_up_2(total_amount - amount_received),
+                    "Dues": utils.round_up_2(total_amount),
                     "old_Invoice_No": invoice_no_final,
                     "Invoice_No": invoice_no_final,
                 }
