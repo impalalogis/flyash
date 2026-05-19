@@ -67,6 +67,7 @@ ROUND_UP_COLUMNS = [
     "Total_Amount",
     "Adjusted_Total_amount",
 ]
+ROUND_UP_0_COLUMNS = {"Total_Amount", "Adjusted_Total_amount"}
 
 
 def _pick_value(row: pd.Series, keys: list[str]) -> object:
@@ -175,10 +176,21 @@ def _parse_date(value: object) -> date | None:
         return value
     if value in ("", None):
         return None
-    parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
+    value_str = str(value).strip()
+    if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", value_str):
+        parsed = pd.to_datetime(value_str, errors="coerce", format="%Y-%m-%d")
+    else:
+        parsed = pd.to_datetime(value_str, errors="coerce", dayfirst=True)
     if pd.isna(parsed):
         return None
     return parsed.date()
+
+
+def _format_sales_log_date(value: object) -> object:
+    parsed = _parse_date(value)
+    if parsed is None:
+        return value
+    return parsed.strftime("%d-%b-%Y")
 
 
 def _generate_invoice_no(
@@ -210,7 +222,8 @@ def _round_up_sales_values(sales_df: pd.DataFrame) -> pd.DataFrame:
         source = sales_df[column]
         parsed = utils.to_numeric_series(source)
         has_value = source.astype(str).str.strip() != ""
-        rounded = parsed.apply(lambda value: utils.round_up_2(value) if pd.notna(value) else value)
+        rounder = utils.round_up_0 if column in ROUND_UP_0_COLUMNS else utils.round_up_2
+        rounded = parsed.apply(lambda value: rounder(value) if pd.notna(value) else value)
         # Arrow-backed string columns can fail on masked numeric assignment.
         # Build the updated column as object and assign it back in one shot.
         updated_column = source.astype(object).copy()
@@ -244,7 +257,7 @@ def _apply_adjusted_columns(sales_df: pd.DataFrame) -> pd.DataFrame:
 
     sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_up_2)
     sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_up_2)
-    sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_up_2)
+    sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_up_0)
     return sales_df
 
 
@@ -261,15 +274,40 @@ def _updated_invoice_series(sales_df: pd.DataFrame) -> pd.Series:
         },
         index=sales_df.index,
     ).sort_values(["_sort_date", "_sort_id"], na_position="last")
-    sequence_by_fy: dict[int, int] = {}
+    invoice_columns = [
+        column for column in ["Invoice_No", "old_Invoice_No"] if column in sales_df.columns
+    ]
+    used_invoices: set[str] = set()
+    invoice_pool: list[str] = []
+    for column in invoice_columns:
+        invoice_pool.extend(
+            sales_df[column].fillna("").astype(str).str.strip().str.upper().tolist()
+        )
+    invoice_pool = [value for value in invoice_pool if value]
     for idx in sort_df.index:
         sort_date = sort_df.at[idx, "_sort_date"]
         if pd.isna(sort_date):
             continue
         sale_date = pd.Timestamp(sort_date).date()
-        fy_start = utils.financial_year_start_year(sale_date)
-        sequence_by_fy[fy_start] = sequence_by_fy.get(fy_start, 0) + 1
-        updated.at[idx] = utils.format_gst_invoice_no(sale_date, sequence_by_fy[fy_start])
+        current_invoice = ""
+        current_sequence = None
+        for column in invoice_columns:
+            candidate = str(sales_df.at[idx, column]).strip().upper()
+            candidate_sequence = utils.invoice_sequence_for_fy(candidate, sale_date)
+            if candidate_sequence is None:
+                continue
+            if current_sequence is None or candidate_sequence > current_sequence:
+                current_invoice = candidate
+                current_sequence = candidate_sequence
+        if current_sequence is not None and current_invoice not in used_invoices:
+            updated.at[idx] = current_invoice
+            used_invoices.add(current_invoice)
+            continue
+
+        generated_invoice = utils.generate_gst_invoice_no(sale_date, invoice_pool)
+        updated.at[idx] = generated_invoice
+        used_invoices.add(generated_invoice)
+        invoice_pool.append(generated_invoice)
     return updated
 
 
@@ -278,6 +316,7 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
     for column in SALES_COLUMNS:
         if column not in sales_df.columns:
             sales_df[column] = ""
+    sales_df["Date"] = sales_df["Date"].apply(_format_sales_log_date)
     sales_df = _round_up_sales_values(sales_df)
     sales_df = _apply_adjusted_columns(sales_df)
     sales_df["Adjusted_Total_amount"] = utils.to_numeric_series(
@@ -312,7 +351,9 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
     sales_df["Customer_Name"] = sales_df["Customer_ID"].map(
         lambda customer_id: customer_map.get(customer_id, "")
     )
-    sales_df["Invoice_No"] = _updated_invoice_series(sales_df)
+    invoice_series = _updated_invoice_series(sales_df)
+    sales_df["Invoice_No"] = invoice_series
+    sales_df["old_Invoice_No"] = invoice_series
     return sales_df
 
 
@@ -864,14 +905,15 @@ def render() -> None:
             rate=0.0,
             freight=0.0,
         )
-        due_display = total_amount
+        total_amount_display = utils.round_up_0(total_amount)
+        due_display = total_amount_display
 
         st.markdown("**Calculated Totals**")
         st.write(f"Amount: {amount:,.2f}")
         st.write(f"GST Amount: {gst_amount:,.2f}")
         st.write(f"Freight: {freight:,.2f}")
-        st.write(f"Total Amount: {total_amount:,.2f}")
-        st.write(f"{due_label} (calc): {due_display:,.2f}")
+        st.write(f"Total Amount: {total_amount_display:,.0f}")
+        st.write(f"{due_label} (calc): {due_display:,.0f}")
 
         submitted = st.form_submit_button("Save Entry")
 
@@ -897,13 +939,14 @@ def render() -> None:
             )
             sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
             fiscal_label = _fy_label_short(sale_date)
-            due_amount = utils.round_up_2(total_amount)
-            existing_invoices = (
-                entries.get("Invoice_No", pd.Series(dtype=str))
-                .astype(str)
-                .str.strip()
-                .tolist()
-            )
+            total_amount_rounded = utils.round_up_0(total_amount)
+            due_amount = total_amount_rounded
+            existing_invoices: list[str] = []
+            for invoice_column in ["Invoice_No", "old_Invoice_No"]:
+                if invoice_column in entries.columns:
+                    existing_invoices.extend(
+                        entries[invoice_column].astype(str).str.strip().tolist()
+                    )
             next_invoice_no = _generate_invoice_no(sale_date, sales_id, existing_invoices)
             manual_invoice_no = str(invoice_no).strip().upper()
             if manual_invoice_no:
@@ -931,7 +974,7 @@ def render() -> None:
             else:
                 data = {
                     "Sales_ID": sales_id,
-                    "Date": sale_date.isoformat(),
+                    "Date": _format_sales_log_date(sale_date),
                     "Fiscal": fiscal_label,
                     "Year": sale_date.strftime("%Y"),
                     "Month": utils.to_month_string(sale_date),
@@ -952,15 +995,15 @@ def render() -> None:
                     "Freight_rate": utils.round_up_2(freight_rate),
                     "Freight": utils.round_up_2(freight),
                     "Transport_Party": transport_party,
-                    "Total_Amount": utils.round_up_2(total_amount),
-                    "Adjusted_Total_amount": utils.round_up_2(total_amount),
+                    "Total_Amount": total_amount_rounded,
+                    "Adjusted_Total_amount": total_amount_rounded,
                     "Freight_Paid": freight_paid,
                     "Freight_Paid_By": freight_paid_by,
                     "Amount_Received": 0.0,
                     "Payment_Mode": "",
                     "Payment_Date": "",
                     "Payment_ID": "",
-                    "Dues": utils.round_up_2(total_amount),
+                    "Dues": due_amount,
                     "old_Invoice_No": invoice_no_final,
                     "Invoice_No": invoice_no_final,
                 }
@@ -1542,7 +1585,7 @@ def render() -> None:
         calc_amount = calc_amount.where(use_sale_rate, fallback_amount)
         calc_gst = calc_gst.where(use_sale_rate, fallback_gst)
         calc_freight = calc_freight.where(use_sale_rate, fallback_freight)
-        calc_total = calc_amount + calc_gst + calc_freight
+        calc_total = (calc_amount + calc_gst + calc_freight).apply(utils.round_up_0)
         calc_due = calc_total - received
         mask = utils.apply_invalid_mask(mask, "Amount", (amount - calc_amount).abs() > 0.01)
         for gst_col in ["GST", "Gst (%12)", "GST(%12)"]:
@@ -1589,12 +1632,12 @@ def render() -> None:
                     if not customers_df.empty and "Customer_ID" in customers_df.columns
                     else pd.Series(dtype=float)
                 ).to_dict()
-                existing_invoices_all = (
-                    entries.get("Invoice_No", pd.Series(dtype=str))
-                    .astype(str)
-                    .str.strip()
-                    .tolist()
-                )
+                existing_invoices_all: list[str] = []
+                for invoice_column in ["Invoice_No", "old_Invoice_No"]:
+                    if invoice_column in entries.columns:
+                        existing_invoices_all.extend(
+                            entries[invoice_column].astype(str).str.strip().tolist()
+                        )
                 for _, row in edited_invalid.iterrows():
                     row = row.where(pd.notnull(row), "")
                     row_id = str(row.get("Sales_ID", "")).strip()
@@ -1629,7 +1672,8 @@ def render() -> None:
                             freight=freight_new,
                         )
                     )
-                    due_new = utils.round_up_2(total_new - received_new)
+                    total_new_rounded = utils.round_up_0(total_new)
+                    due_new = utils.round_up_2(total_new_rounded - received_new)
 
                     data = row.to_dict()
                     data["Rate"] = utils.round_up_2(rate_calc)
@@ -1642,11 +1686,12 @@ def render() -> None:
                     )
                     data["Adjusted_Amount"] = utils.round_up_2(amount_new + freight_total)
                     data["Freight"] = utils.round_up_2(freight_total)
-                    data["Total_Amount"] = utils.round_up_2(total_new)
-                    data["Adjusted_Total_amount"] = utils.round_up_2(total_new)
-                    data["Dues"] = utils.round_up_2(total_new - received_new)
+                    data["Total_Amount"] = total_new_rounded
+                    data["Adjusted_Total_amount"] = total_new_rounded
+                    data["Dues"] = due_new
                     entry_date = _parse_date(row.get("Date", ""))
                     if entry_date:
+                        data["Date"] = _format_sales_log_date(entry_date)
                         fiscal_label = _fy_label_short(entry_date)
                         data["Year"] = entry_date.strftime("%Y")
                         data["Month"] = utils.to_month_string(entry_date)
