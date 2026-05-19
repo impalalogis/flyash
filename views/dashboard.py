@@ -375,10 +375,20 @@ def _period_cost_summary(
 def _safe_corr(series_a: pd.Series, series_b: pd.Series) -> float | None:
     if series_a.empty or series_b.empty or len(series_a) < 2:
         return None
-    aligned = pd.DataFrame({"a": series_a, "b": series_b}).dropna()
+    aligned = pd.DataFrame(
+        {
+            "a": pd.to_numeric(series_a, errors="coerce"),
+            "b": pd.to_numeric(series_b, errors="coerce"),
+        }
+    ).dropna()
     if len(aligned) < 2:
         return None
-    return float(aligned["a"].corr(aligned["b"]))
+    if aligned["a"].nunique() < 2 or aligned["b"].nunique() < 2:
+        return None
+    correlation = aligned["a"].corr(aligned["b"])
+    if pd.isna(correlation):
+        return None
+    return float(correlation)
 
 
 def _latest_change(summary_df: pd.DataFrame, value_col: str) -> dict | None:

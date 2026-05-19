@@ -196,22 +196,47 @@ def _month_hint_number(value: object) -> int | None:
     return None
 
 
+def _parse_datetime_series(series: pd.Series, *, dayfirst: bool) -> pd.Series:
+    parsed = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    if series.empty:
+        return parsed
+
+    values = series.astype(str).str.strip()
+    iso_mask = values.str.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}(?:[T\s].*)?")
+    if iso_mask.any():
+        parsed.loc[iso_mask] = pd.to_datetime(series.loc[iso_mask], errors="coerce")
+    other_mask = ~iso_mask
+    if other_mask.any():
+        try:
+            parsed.loc[other_mask] = pd.to_datetime(
+                series.loc[other_mask],
+                errors="coerce",
+                dayfirst=dayfirst,
+                format="mixed",
+            )
+        except TypeError:
+            parsed.loc[other_mask] = pd.to_datetime(
+                series.loc[other_mask],
+                errors="coerce",
+                dayfirst=dayfirst,
+            )
+    return parsed
+
+
 def parse_date_series(
     series: pd.Series,
     *,
     dayfirst: bool = False,
     month_hint: pd.Series | None = None,
 ) -> pd.Series:
-    parsed_dayfirst = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst)
+    parsed_dayfirst = _parse_datetime_series(series, dayfirst=dayfirst)
     if month_hint is None:
         if parsed_dayfirst.isna().any():
-            parsed_monthfirst = pd.to_datetime(
-                series, errors="coerce", dayfirst=not dayfirst
-            )
+            parsed_monthfirst = _parse_datetime_series(series, dayfirst=not dayfirst)
             parsed_dayfirst = parsed_dayfirst.fillna(parsed_monthfirst)
         return parsed_dayfirst
 
-    parsed_monthfirst = pd.to_datetime(series, errors="coerce", dayfirst=not dayfirst)
+    parsed_monthfirst = _parse_datetime_series(series, dayfirst=not dayfirst)
     hint_months = pd.to_numeric(month_hint.apply(_month_hint_number), errors="coerce")
     day_month = parsed_dayfirst.dt.month
     month_month = parsed_monthfirst.dt.month
