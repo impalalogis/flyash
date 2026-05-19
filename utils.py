@@ -55,6 +55,14 @@ def round_up_2(value: object, default: float = 0.0) -> float:
     return float(quantized)
 
 
+def round_up_0(value: object, default: int = 0) -> int:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return default
+    return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_UP))
+
+
 def financial_year_start_year(value: date) -> int:
     return value.year if value.month >= 4 else value.year - 1
 
@@ -91,6 +99,10 @@ def _invoice_sequence_for_fy(invoice: object, sale_date: date) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def invoice_sequence_for_fy(invoice: object, sale_date: date) -> int | None:
+    return _invoice_sequence_for_fy(invoice, sale_date)
 
 
 def format_gst_invoice_no(sale_date: date, sequence: int) -> str:
