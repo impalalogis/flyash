@@ -25,6 +25,7 @@ ID_COLUMNS = {
 }
 
 READ_CACHE_TTL = 120
+MANUAL_SALES_LOG_COLUMNS = {"old_Invoice_No", "Invoice_No"}
 
 
 def _should_recompute_stock(table_name: str) -> bool:
@@ -94,6 +95,60 @@ def _get_header(worksheet: gspread.Worksheet) -> list[str]:
     return header
 
 
+def _without_manual_sales_log_columns(
+    table_name: str,
+    data: Dict[str, Any],
+) -> Dict[str, Any]:
+    if table_name != "Sales_Log":
+        return data
+    return {
+        key: value
+        for key, value in data.items()
+        if key not in MANUAL_SALES_LOG_COLUMNS
+    }
+
+
+def _preserve_manual_sales_log_columns(
+    worksheet: gspread.Worksheet,
+    data_frame: pd.DataFrame,
+) -> pd.DataFrame:
+    if "Sales_ID" not in data_frame.columns:
+        return data_frame
+
+    rows = worksheet.get_all_values()
+    if not rows:
+        return data_frame
+
+    header = rows[0]
+    protected_columns = [
+        column for column in header if column in MANUAL_SALES_LOG_COLUMNS
+    ]
+    if not protected_columns or "Sales_ID" not in header:
+        return data_frame
+
+    sales_id_idx = header.index("Sales_ID")
+    protected_indices = {
+        column: header.index(column) for column in protected_columns
+    }
+    manual_values: dict[str, dict[str, str]] = {}
+    for row in rows[1:]:
+        sales_id = row[sales_id_idx].strip() if sales_id_idx < len(row) else ""
+        if not sales_id:
+            continue
+        manual_values[sales_id] = {
+            column: row[idx] if idx < len(row) else ""
+            for column, idx in protected_indices.items()
+        }
+
+    updated = data_frame.copy()
+    sales_ids = updated["Sales_ID"].astype(str).str.strip()
+    for column in protected_columns:
+        updated[column] = sales_ids.map(
+            lambda sales_id: manual_values.get(sales_id, {}).get(column, "")
+        )
+    return updated
+
+
 def _safe_header(raw_header: list[str], data_rows: list[list[str]]) -> list[str]:
     max_len = max([len(raw_header)] + [len(row) for row in data_rows] + [0])
     header = raw_header + [""] * (max_len - len(raw_header))
@@ -145,6 +200,7 @@ def update_stock_log() -> None:
 def insert_row(table_name: str, data: Dict[str, Any], *, recompute_stock: bool = True) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
+    data = _without_manual_sales_log_columns(table_name, data)
     row = [data.get(column, "") for column in header]
     worksheet.append_row(row, value_input_option="USER_ENTERED")
     clear_read_cache()
@@ -183,6 +239,7 @@ def update_row(
     if len(row_values) < len(header):
         row_values.extend([""] * (len(header) - len(row_values)))
 
+    data = _without_manual_sales_log_columns(table_name, data)
     for key, value in data.items():
         if key in header:
             row_values[header.index(key)] = value
@@ -216,6 +273,8 @@ def replace_table(
 ) -> None:
     worksheet = _get_worksheet(table_name)
     data_frame = data_frame.copy()
+    if table_name == "Sales_Log":
+        data_frame = _preserve_manual_sales_log_columns(worksheet, data_frame)
     data_frame = data_frame.where(pd.notnull(data_frame), "")
     rows = [data_frame.columns.tolist()] + data_frame.values.tolist()
     worksheet.clear()

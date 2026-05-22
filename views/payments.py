@@ -104,38 +104,39 @@ def _reconcile_payments(
     ).fillna(0.0)
     sales_df["Dues"] = sales_df["Total_Amount"] - sales_df["Amount_Received"]
 
-    def _ensure_invoice_numbers(frame: pd.DataFrame) -> pd.DataFrame:
-        frame = frame.copy()
-        if frame.empty or "Invoice_No" not in frame.columns:
-            return frame
-        existing_invoices = {
-            str(value).strip()
-            for value in frame.get("Invoice_No", pd.Series(dtype=str)).tolist()
-            if str(value).strip()
-        }
-        month_hint = frame["Month"] if "Month" in frame.columns else None
-        date_series = utils.parse_date_series(frame.get("Date", pd.Series(dtype=str)), month_hint=month_hint)
-        sort_key = pd.DataFrame(
-            {
-                "_sort_date": date_series,
-                "_sort_id": frame.get("Sales_ID", pd.Series(dtype=str)).astype(str),
-            },
-            index=frame.index,
-        )
-        for idx in sort_key.sort_values(["_sort_date", "_sort_id"], na_position="last").index:
-            current = str(frame.at[idx, "Invoice_No"]).strip()
-            if current:
-                continue
-            date_val = date_series.loc[idx]
-            if pd.isna(date_val):
-                continue
-            sale_date = pd.Timestamp(date_val).date()
-            candidate = utils.generate_gst_invoice_no(sale_date, existing_invoices)
-            frame.at[idx, "Invoice_No"] = candidate
-            existing_invoices.add(candidate)
-        return frame
+    # Invoice numbers are maintained manually in the sheet for now.
+    # def _ensure_invoice_numbers(frame: pd.DataFrame) -> pd.DataFrame:
+    #     frame = frame.copy()
+    #     if frame.empty or "Invoice_No" not in frame.columns:
+    #         return frame
+    #     existing_invoices = {
+    #         str(value).strip()
+    #         for value in frame.get("Invoice_No", pd.Series(dtype=str)).tolist()
+    #         if str(value).strip()
+    #     }
+    #     month_hint = frame["Month"] if "Month" in frame.columns else None
+    #     date_series = utils.parse_date_series(frame.get("Date", pd.Series(dtype=str)), month_hint=month_hint)
+    #     sort_key = pd.DataFrame(
+    #         {
+    #             "_sort_date": date_series,
+    #             "_sort_id": frame.get("Sales_ID", pd.Series(dtype=str)).astype(str),
+    #         },
+    #         index=frame.index,
+    #     )
+    #     for idx in sort_key.sort_values(["_sort_date", "_sort_id"], na_position="last").index:
+    #         current = str(frame.at[idx, "Invoice_No"]).strip()
+    #         if current:
+    #             continue
+    #         date_val = date_series.loc[idx]
+    #         if pd.isna(date_val):
+    #             continue
+    #         sale_date = pd.Timestamp(date_val).date()
+    #         candidate = utils.generate_gst_invoice_no(sale_date, existing_invoices)
+    #         frame.at[idx, "Invoice_No"] = candidate
+    #         existing_invoices.add(candidate)
+    #     return frame
 
-    sales_df = _ensure_invoice_numbers(sales_df)
+    # sales_df = _ensure_invoice_numbers(sales_df)
 
     payments_df["Payment_Status"] = payments_df.get(
         "Payment_Status", pd.Series(dtype=str)
@@ -215,8 +216,9 @@ def _reconcile_payments(
             for ref in applied_refs:
                 if ref not in invoice_values:
                     invoice_values.append(ref)
-            if invoice_values:
-                payments_df.at[payment_idx, "Invoice_No"] = ", ".join(invoice_values)
+            # Invoice numbers are maintained manually in the sheet for now.
+            # if invoice_values:
+            #     payments_df.at[payment_idx, "Invoice_No"] = ", ".join(invoice_values)
 
             if remaining <= 0:
                 payments_df.at[payment_idx, "Payment_Status"] = "Settled"
