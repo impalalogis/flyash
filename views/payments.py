@@ -190,7 +190,11 @@ def _reconcile_payments(
                 dues = float(sales_df.at[sale_idx, "Dues"])
                 if dues <= 0:
                     continue
-                invoice_ref = str(sales_df.at[sale_idx, "Invoice_No"]).strip()
+                invoice_ref = (
+                    str(sales_df.at[sale_idx, "old_Invoice_No"]).strip()
+                    if "old_Invoice_No" in sales_df.columns
+                    else ""
+                )
                 if not invoice_ref:
                     invoice_ref = str(sales_df.at[sale_idx, "Sales_ID"]).strip()
                 if invoice_ref:
