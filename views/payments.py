@@ -216,9 +216,8 @@ def _reconcile_payments(
             for ref in applied_refs:
                 if ref not in invoice_values:
                     invoice_values.append(ref)
-            # Invoice numbers are maintained manually in the sheet for now.
-            # if invoice_values:
-            #     payments_df.at[payment_idx, "Invoice_No"] = ", ".join(invoice_values)
+            if invoice_values:
+                payments_df.at[payment_idx, "Invoice_No"] = ", ".join(invoice_values)
 
             if remaining <= 0:
                 payments_df.at[payment_idx, "Payment_Status"] = "Settled"
