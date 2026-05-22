@@ -42,8 +42,8 @@ SALES_COLUMNS = [
     "Payment_Date",
     "Payment_ID",
     "Dues",
-    "old_Invoice_No",
-    "Invoice_No",
+    # "old_Invoice_No",  # Managed manually in the sheet; do not add/update from app.
+    # "Invoice_No",  # Managed manually in the sheet; do not add/update from app.
 ]
 
 SHOW_SALES_RECORDS = False
@@ -351,9 +351,10 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
     sales_df["Customer_Name"] = sales_df["Customer_ID"].map(
         lambda customer_id: customer_map.get(customer_id, "")
     )
-    invoice_series = _updated_invoice_series(sales_df)
-    sales_df["Invoice_No"] = invoice_series
-    sales_df["old_Invoice_No"] = invoice_series
+    # Invoice columns are maintained manually in the sheet for now.
+    # invoice_series = _updated_invoice_series(sales_df)
+    # sales_df["Invoice_No"] = invoice_series
+    # sales_df["old_Invoice_No"] = invoice_series
     return sales_df
 
 
@@ -896,7 +897,8 @@ def render() -> None:
             transport_party = st.text_input("Transport Party")
             freight_paid = st.selectbox("Freight Paid", ["No", "Yes"], index=0)
             freight_paid_by = st.selectbox("Freight Paid By", ["Party", "Company"], index=0)
-            invoice_no = st.text_input("Invoice No (optional, next GST sequence only)")
+            # Invoice numbers are maintained manually in the sheet for now.
+            # invoice_no = st.text_input("Invoice No (optional, next GST sequence only)")
 
         rate, gst_amount, amount, freight, total_amount = _sales_values_from_rates(
             qty,
@@ -941,24 +943,25 @@ def render() -> None:
             fiscal_label = _fy_label_short(sale_date)
             total_amount_rounded = utils.round_up_0(total_amount)
             due_amount = total_amount_rounded
-            existing_invoices: list[str] = []
-            for invoice_column in ["Invoice_No", "old_Invoice_No"]:
-                if invoice_column in entries.columns:
-                    existing_invoices.extend(
-                        entries[invoice_column].astype(str).str.strip().tolist()
-                    )
-            next_invoice_no = _generate_invoice_no(sale_date, sales_id, existing_invoices)
-            manual_invoice_no = str(invoice_no).strip().upper()
-            if manual_invoice_no:
-                if not utils.is_valid_invoice_identifier(manual_invoice_no):
-                    errors.append(
-                        "Invoice No must be <=16 chars and use only letters, numbers, '-' or '/'."
-                    )
-                elif manual_invoice_no != next_invoice_no:
-                    errors.append(
-                        f"Invoice No must follow GST sequence. Expected next invoice: {next_invoice_no}"
-                    )
-            invoice_no_final = manual_invoice_no or next_invoice_no
+            # Invoice numbers are maintained manually in the sheet for now.
+            # existing_invoices: list[str] = []
+            # for invoice_column in ["Invoice_No", "old_Invoice_No"]:
+            #     if invoice_column in entries.columns:
+            #         existing_invoices.extend(
+            #             entries[invoice_column].astype(str).str.strip().tolist()
+            #         )
+            # next_invoice_no = _generate_invoice_no(sale_date, sales_id, existing_invoices)
+            # manual_invoice_no = str(invoice_no).strip().upper()
+            # if manual_invoice_no:
+            #     if not utils.is_valid_invoice_identifier(manual_invoice_no):
+            #         errors.append(
+            #             "Invoice No must be <=16 chars and use only letters, numbers, '-' or '/'."
+            #         )
+            #     elif manual_invoice_no != next_invoice_no:
+            #         errors.append(
+            #             f"Invoice No must follow GST sequence. Expected next invoice: {next_invoice_no}"
+            #         )
+            # invoice_no_final = manual_invoice_no or next_invoice_no
             customer_name_value = (
                 customers.loc[customers["Customer_ID"] == customer_id]
                 .get("Name", pd.Series(dtype=str))
@@ -1004,8 +1007,9 @@ def render() -> None:
                     "Payment_Date": "",
                     "Payment_ID": "",
                     "Dues": due_amount,
-                    "old_Invoice_No": invoice_no_final,
-                    "Invoice_No": invoice_no_final,
+                    # Invoice numbers are maintained manually in the sheet for now.
+                    # "old_Invoice_No": invoice_no_final,
+                    # "Invoice_No": invoice_no_final,
                 }
                 data = {key: data.get(key, "") for key in SALES_COLUMNS}
                 database.insert_row("Sales_Log", data)
@@ -1632,12 +1636,13 @@ def render() -> None:
                     if not customers_df.empty and "Customer_ID" in customers_df.columns
                     else pd.Series(dtype=float)
                 ).to_dict()
-                existing_invoices_all: list[str] = []
-                for invoice_column in ["Invoice_No", "old_Invoice_No"]:
-                    if invoice_column in entries.columns:
-                        existing_invoices_all.extend(
-                            entries[invoice_column].astype(str).str.strip().tolist()
-                        )
+                # Invoice numbers are maintained manually in the sheet for now.
+                # existing_invoices_all: list[str] = []
+                # for invoice_column in ["Invoice_No", "old_Invoice_No"]:
+                #     if invoice_column in entries.columns:
+                #         existing_invoices_all.extend(
+                #             entries[invoice_column].astype(str).str.strip().tolist()
+                #         )
                 for _, row in edited_invalid.iterrows():
                     row = row.where(pd.notnull(row), "")
                     row_id = str(row.get("Sales_ID", "")).strip()
@@ -1676,6 +1681,8 @@ def render() -> None:
                     due_new = utils.round_up_2(total_new_rounded - received_new)
 
                     data = row.to_dict()
+                    for invoice_column in ["old_Invoice_No", "Invoice_No"]:
+                        data.pop(invoice_column, None)
                     data["Rate"] = utils.round_up_2(rate_calc)
                     data["Amount"] = utils.round_up_2(amount_new)
                     data["GST"] = utils.round_up_2(gst_new)
@@ -1698,16 +1705,17 @@ def render() -> None:
                         data["Fiscal"] = fiscal_label
                         data["Fiscal Year"] = fiscal_label
                         data["Fiscal_Year"] = fiscal_label
-                    invoice_current = str(row.get("Invoice_No", "")).strip()
-                    if not invoice_current:
-                        generated_invoice = _generate_invoice_no(
-                            entry_date or date.today(),
-                            row_id,
-                            existing_invoices_all,
-                        )
-                        data["Invoice_No"] = generated_invoice
-                        existing_invoices_all.append(generated_invoice)
-                    data["Updated_Invoice_No"] = data.get("Invoice_No", "")
+                    # Invoice numbers are maintained manually in the sheet for now.
+                    # invoice_current = str(row.get("Invoice_No", "")).strip()
+                    # if not invoice_current:
+                    #     generated_invoice = _generate_invoice_no(
+                    #         entry_date or date.today(),
+                    #         row_id,
+                    #         existing_invoices_all,
+                    #     )
+                    #     data["Invoice_No"] = generated_invoice
+                    #     existing_invoices_all.append(generated_invoice)
+                    # data["Updated_Invoice_No"] = data.get("Invoice_No", "")
 
                     database.update_row("Sales_Log", row_id, data)
 
