@@ -32,6 +32,20 @@ def _filter_by_date(data_frame: pd.DataFrame, column: str, start: date, end: dat
     return data_frame[(series >= start_ts) & (series <= end_ts)]
 
 
+def _sales_bricks_series(sales_df: pd.DataFrame) -> pd.Series:
+    """Return sold bricks with fallback to Qty for newer Sales_Log schema."""
+    index = sales_df.index
+    sales_bricks = utils.to_numeric_series(
+        sales_df.get("No_of_Bricks", pd.Series(index=index, dtype=float))
+    )
+    qty_bricks = utils.to_numeric_series(
+        sales_df.get("Qty", pd.Series(index=index, dtype=float))
+    )
+    if "No_of_Bricks" not in sales_df.columns:
+        return qty_bricks.fillna(0.0)
+    return sales_bricks.where(sales_bricks.notna(), qty_bricks).fillna(0.0)
+
+
 def _add_period_column(data_frame: pd.DataFrame, column: str, period: str) -> pd.DataFrame:
     if column not in data_frame.columns:
         return data_frame
@@ -445,6 +459,7 @@ def render() -> None:
         sales,
         [
             "No_of_Bricks",
+            "Qty",
             "Rate",
             "GST",
             "Gst (%12)",
@@ -455,6 +470,8 @@ def render() -> None:
             "Dues",
         ],
     )
+    sales = sales.copy()
+    sales["No_of_Bricks"] = _sales_bricks_series(sales)
     expenses = _parse_dates(database.read_table("Expenses"), "Date")
     expenses = utils.coerce_numeric_columns(
         expenses,
