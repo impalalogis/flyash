@@ -55,7 +55,7 @@ PRODUCT_HSN_MAP = {
     "paver blocks": "6810",  # Assuming a code, can be updated
     "concrete blocks": "6810",  # Assuming
 }
-ROUND_UP_COLUMNS = [
+ROUND_DOWN_COLUMNS = [
     "Sale rate",
     "Rate",
     "GST(%12)",
@@ -67,7 +67,7 @@ ROUND_UP_COLUMNS = [
     "Total_Amount",
     "Adjusted_Total_amount",
 ]
-ROUND_UP_0_COLUMNS = {"Total_Amount", "Adjusted_Total_amount"}
+ROUND_DOWN_0_COLUMNS = {"Total_Amount", "Adjusted_Total_amount"}
 
 
 def _pick_value(row: pd.Series, keys: list[str]) -> object:
@@ -214,15 +214,15 @@ def _sort_sales_log() -> None:
     database.replace_table("Sales_Log", sorted_df, recompute_stock=False)
 
 
-def _round_up_sales_values(sales_df: pd.DataFrame) -> pd.DataFrame:
+def _round_down_sales_values(sales_df: pd.DataFrame) -> pd.DataFrame:
     sales_df = sales_df.copy()
-    for column in ROUND_UP_COLUMNS:
+    for column in ROUND_DOWN_COLUMNS:
         if column not in sales_df.columns:
             continue
         source = sales_df[column]
         parsed = utils.to_numeric_series(source)
         has_value = source.astype(str).str.strip() != ""
-        rounder = utils.round_up_0 if column in ROUND_UP_0_COLUMNS else utils.round_up_2
+        rounder = utils.round_down_0 if column in ROUND_DOWN_0_COLUMNS else utils.round_down_2
         rounded = parsed.apply(lambda value: rounder(value) if pd.notna(value) else value)
         # Arrow-backed string columns can fail on masked numeric assignment.
         # Build the updated column as object and assign it back in one shot.
@@ -255,9 +255,9 @@ def _apply_adjusted_columns(sales_df: pd.DataFrame) -> pd.DataFrame:
     adjusted_amount = adjusted_rate * bricks
     adjusted_total = adjusted_amount + gst
 
-    sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_up_2)
-    sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_up_2)
-    sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_up_0)
+    sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_down_2)
+    sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_down_2)
+    sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_down_0)
     return sales_df
 
 
@@ -317,7 +317,7 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
         if column not in sales_df.columns:
             sales_df[column] = ""
     sales_df["Date"] = sales_df["Date"].apply(_format_sales_log_date)
-    sales_df = _round_up_sales_values(sales_df)
+    sales_df = _round_down_sales_values(sales_df)
     sales_df = _apply_adjusted_columns(sales_df)
     sales_df["Adjusted_Total_amount"] = utils.to_numeric_series(
         sales_df.get("Adjusted_Total_amount", pd.Series(dtype=float))
@@ -331,7 +331,7 @@ def _apply_sales_log_rules(sales_df: pd.DataFrame, customers_df: pd.DataFrame) -
     
     # Calculate dues as numeric Series
     dues_calc = sales_df["Adjusted_Total_amount"] - sales_df["Amount_Received"]
-    dues_calc = dues_calc.apply(lambda x: utils.round_up_2(x))
+    dues_calc = dues_calc.apply(lambda x: utils.round_down_2(x))
     
     # Convert existing string dues to numeric
     existing_dues_numeric = pd.to_numeric(existing_dues_str, errors='coerce').fillna(0.0)
@@ -369,7 +369,7 @@ def _sync_sales_log_rules(customers_df: pd.DataFrame) -> None:
     for column in compare_columns:
         current_col = current_df[column] if column in current_df.columns else pd.Series("", index=updated_df.index)
         updated_col = updated_df[column]
-        if column in ROUND_UP_COLUMNS:
+        if column in ROUND_DOWN_COLUMNS:
             current_num = pd.to_numeric(current_col, errors="coerce")
             updated_num = pd.to_numeric(updated_col, errors="coerce")
             current_cmp = current_num.apply(
@@ -907,7 +907,7 @@ def render() -> None:
             rate=0.0,
             freight=0.0,
         )
-        total_amount_display = utils.round_up_0(total_amount)
+        total_amount_display = utils.round_down_0(total_amount)
         due_display = total_amount_display
 
         st.markdown("**Calculated Totals**")
@@ -941,7 +941,7 @@ def render() -> None:
             )
             sales_id = database.generate_log_id("SAL", sale_date, existing_ids)
             fiscal_label = _fy_label_short(sale_date)
-            total_amount_rounded = utils.round_up_0(total_amount)
+            total_amount_rounded = utils.round_down_0(total_amount)
             due_amount = total_amount_rounded
             # Invoice numbers are maintained manually in the sheet for now.
             # existing_invoices: list[str] = []
@@ -987,16 +987,16 @@ def render() -> None:
                     "Product": product,
                     "HSN Code": PRODUCT_HSN_MAP.get(product, "6815"),
                     "Qty": qty,
-                    "Sale rate": utils.round_up_2(sale_rate),
-                    "Rate": utils.round_up_2(rate),
-                    "GST(%12)": utils.round_up_2(gst_amount),
-                    "Adjusted_Rate": utils.round_up_2(
+                    "Sale rate": utils.round_down_2(sale_rate),
+                    "Rate": utils.round_down_2(rate),
+                    "GST(%12)": utils.round_down_2(gst_amount),
+                    "Adjusted_Rate": utils.round_down_2(
                         (amount + freight) / qty if qty > 0 else 0.0
                     ),
-                    "Adjusted_Amount": utils.round_up_2(amount + freight),
-                    "Amount": utils.round_up_2(amount),
-                    "Freight_rate": utils.round_up_2(freight_rate),
-                    "Freight": utils.round_up_2(freight),
+                    "Adjusted_Amount": utils.round_down_2(amount + freight),
+                    "Amount": utils.round_down_2(amount),
+                    "Freight_rate": utils.round_down_2(freight_rate),
+                    "Freight": utils.round_down_2(freight),
                     "Transport_Party": transport_party,
                     "Total_Amount": total_amount_rounded,
                     "Adjusted_Total_amount": total_amount_rounded,
@@ -1589,7 +1589,7 @@ def render() -> None:
         calc_amount = calc_amount.where(use_sale_rate, fallback_amount)
         calc_gst = calc_gst.where(use_sale_rate, fallback_gst)
         calc_freight = calc_freight.where(use_sale_rate, fallback_freight)
-        calc_total = (calc_amount + calc_gst + calc_freight).apply(utils.round_up_0)
+        calc_total = (calc_amount + calc_gst + calc_freight).apply(utils.round_down_0)
         calc_due = calc_total - received
         mask = utils.apply_invalid_mask(mask, "Amount", (amount - calc_amount).abs() > 0.01)
         for gst_col in ["GST", "Gst (%12)", "GST(%12)"]:
@@ -1677,22 +1677,22 @@ def render() -> None:
                             freight=freight_new,
                         )
                     )
-                    total_new_rounded = utils.round_up_0(total_new)
-                    due_new = utils.round_up_2(total_new_rounded - received_new)
+                    total_new_rounded = utils.round_down_0(total_new)
+                    due_new = utils.round_down_2(total_new_rounded - received_new)
 
                     data = row.to_dict()
                     for invoice_column in ["old_Invoice_No", "Invoice_No"]:
                         data.pop(invoice_column, None)
-                    data["Rate"] = utils.round_up_2(rate_calc)
-                    data["Amount"] = utils.round_up_2(amount_new)
-                    data["GST"] = utils.round_up_2(gst_new)
-                    data["Gst (%12)"] = utils.round_up_2(gst_new)
-                    data["GST(%12)"] = utils.round_up_2(gst_new)
-                    data["Adjusted_Rate"] = utils.round_up_2(
+                    data["Rate"] = utils.round_down_2(rate_calc)
+                    data["Amount"] = utils.round_down_2(amount_new)
+                    data["GST"] = utils.round_down_2(gst_new)
+                    data["Gst (%12)"] = utils.round_down_2(gst_new)
+                    data["GST(%12)"] = utils.round_down_2(gst_new)
+                    data["Adjusted_Rate"] = utils.round_down_2(
                         (amount_new + freight_total) / bricks_val if bricks_val > 0 else 0.0
                     )
-                    data["Adjusted_Amount"] = utils.round_up_2(amount_new + freight_total)
-                    data["Freight"] = utils.round_up_2(freight_total)
+                    data["Adjusted_Amount"] = utils.round_down_2(amount_new + freight_total)
+                    data["Freight"] = utils.round_down_2(freight_total)
                     data["Total_Amount"] = total_new_rounded
                     data["Adjusted_Total_amount"] = total_new_rounded
                     data["Dues"] = due_new

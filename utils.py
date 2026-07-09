@@ -6,7 +6,7 @@ import re
 from typing import Iterable
 import base64
 import binascii
-from decimal import Decimal, InvalidOperation, ROUND_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_UP
 import io
 import os
 import tempfile
@@ -61,6 +61,23 @@ def round_up_0(value: object, default: int = 0) -> int:
     except (InvalidOperation, ValueError, TypeError):
         return default
     return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_UP))
+
+
+def round_down_2(value: object, default: float = 0.0) -> float:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return default
+    quantized = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    return float(quantized)
+
+
+def round_down_0(value: object, default: int = 0) -> int:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return default
+    return int(decimal_value.quantize(Decimal("1"), rounding=ROUND_DOWN))
 
 
 def financial_year_start_year(value: date) -> int:
