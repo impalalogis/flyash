@@ -34,14 +34,14 @@ adjusted_rate.loc[valid_bricks] = (amount.loc[valid_bricks] + freight.loc[valid_
 adjusted_amount = adjusted_rate * bricks
 adjusted_total = adjusted_amount + gst
 
-sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_up_2)
-sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_up_2)
-sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_up_2)
+sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_down_2)
+sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_down_2)
+sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_down_0)
 
 # Recalculate Dues
 adjusted_total = utils.to_numeric_series(sales_df.get('Adjusted_Total_amount', pd.Series(dtype=float))).fillna(0.0)
 amount_received = utils.to_numeric_series(sales_df.get('Amount_Received', pd.Series(dtype=float))).fillna(0.0)
-sales_df['Dues'] = (adjusted_total - amount_received).apply(utils.round_up_2)
+sales_df['Dues'] = (adjusted_total - amount_received).apply(utils.round_down_2)
 
 database.replace_table('Sales_Log', sales_df)
 print('Updated Adjusted columns and Dues for all sales records')
