@@ -21,22 +21,16 @@ empty = pd.Series("", index=sales_df.index, dtype=object)
 bricks = utils.to_numeric_series(sales_df.get("Qty", empty)).fillna(0.0)
 amount = utils.to_numeric_series(sales_df.get("Amount", empty)).fillna(0.0)
 freight = utils.to_numeric_series(sales_df.get("Freight", empty)).fillna(0.0)
-gst_source = sales_df.get("GST(%12)")
-if gst_source is None:
-    gst_source = sales_df.get("Gst (%12)")
-if gst_source is None:
-    gst_source = sales_df.get("GST", empty)
-gst = utils.to_numeric_series(gst_source).fillna(0.0)
 
 adjusted_rate = pd.Series(0.0, index=sales_df.index, dtype=float)
 valid_bricks = bricks > 0
 adjusted_rate.loc[valid_bricks] = (amount.loc[valid_bricks] + freight.loc[valid_bricks]) / bricks.loc[valid_bricks]
 adjusted_amount = adjusted_rate * bricks
-adjusted_total = adjusted_amount + gst
 
 sales_df["Adjusted_Rate"] = adjusted_rate.apply(utils.round_down_2)
 sales_df["Adjusted_Amount"] = adjusted_amount.apply(utils.round_down_2)
-sales_df["Adjusted_Total_amount"] = adjusted_total.apply(utils.round_down_0)
+total_amount = utils.to_numeric_series(sales_df.get("Total_Amount", empty)).fillna(0.0)
+sales_df["Adjusted_Total_amount"] = total_amount.apply(utils.round_down_0)
 
 # Recalculate Dues
 adjusted_total = utils.to_numeric_series(sales_df.get('Adjusted_Total_amount', pd.Series(dtype=float))).fillna(0.0)
