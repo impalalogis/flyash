@@ -13,16 +13,7 @@ PHYSICAL_COLUMNS = ["Date", "Material", "Physical_Stock_Tons", "Notes"]
 
 
 def _parse_date(value: object) -> date | None:
-    if isinstance(value, date):
-        return value
-    if isinstance(value, datetime):
-        return value.date()
-    if value in ("", None):
-        return None
-    try:
-        return pd.to_datetime(str(value), errors="coerce", dayfirst=True).date()
-    except Exception:
-        return None
+    return utils.parse_date_value(value, dayfirst=True)
 
 
 def _latest_by_material(frame: pd.DataFrame, material: str, date_limit: date) -> float:
@@ -90,7 +81,7 @@ def render() -> None:
     physical_editor = st.data_editor(
         physical_df,
         num_rows="dynamic",
-        width="stretch",
+        use_container_width=True,
         key="physical_stock_editor",
     )
     if st.button("Save Physical Stock", key="save_physical_stock"):
@@ -100,7 +91,7 @@ def render() -> None:
 
     raw_df = database.read_table("Raw_Material_Log")
     raw_df = utils.ensure_columns(raw_df, ["Date", "Material", "Qty", "Total_Cost"])
-    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
+    raw_df["Date"] = utils.to_datetime_series_explicit(raw_df["Date"], dayfirst=True).dt.date
     raw_df["Qty"] = utils.to_numeric_series(raw_df.get("Qty", pd.Series(dtype=float))).fillna(0.0)
     raw_df["Material"] = raw_df["Material"].astype(str).str.strip().apply(
         utils.canonical_material_label
@@ -117,14 +108,14 @@ def render() -> None:
         production_df,
         ["Date", "No_of_Bricks", "Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption"],
     )
-    production_df["Date"] = pd.to_datetime(production_df["Date"], errors="coerce", dayfirst=True).dt.date
+    production_df["Date"] = utils.to_datetime_series_explicit(production_df["Date"], dayfirst=True).dt.date
 
     stock_df = database.read_table("Stock_Log")
     stock_df = utils.ensure_columns(stock_df, ["Date", "Material", "Closing"])
-    stock_df["Date"] = pd.to_datetime(stock_df["Date"], errors="coerce", dayfirst=True).dt.date
+    stock_df["Date"] = utils.to_datetime_series_explicit(stock_df["Date"], dayfirst=True).dt.date
 
     physical_df = physical_df.copy()
-    physical_df["Date"] = pd.to_datetime(physical_df["Date"], errors="coerce", dayfirst=True).dt.date
+    physical_df["Date"] = utils.to_datetime_series_explicit(physical_df["Date"], dayfirst=True).dt.date
     physical_df["Physical_Stock_Tons"] = utils.to_numeric_series(
         physical_df.get("Physical_Stock_Tons", pd.Series(dtype=float))
     ).fillna(0.0)
@@ -348,19 +339,19 @@ def render() -> None:
     )
 
     st.subheader("Stock Summary (tons)")
-    st.dataframe(pd.DataFrame(system_rows), width="stretch")
+    st.dataframe(pd.DataFrame(system_rows), use_container_width=True)
 
     st.subheader("System Stock vs Physical Stock")
-    st.dataframe(pd.DataFrame(physical_rows), width="stretch")
+    st.dataframe(pd.DataFrame(physical_rows), use_container_width=True)
 
     st.subheader("Material Usage per Brick")
-    st.dataframe(pd.DataFrame(usage_rows), width="stretch")
+    st.dataframe(pd.DataFrame(usage_rows), use_container_width=True)
 
     st.subheader("Composition Percentages per Brick")
-    st.dataframe(pd.DataFrame(usage_rows)[["Material", "Composition_%"]], width="stretch")
+    st.dataframe(pd.DataFrame(usage_rows)[["Material", "Composition_%"]], use_container_width=True)
 
     st.subheader("Standard vs Actual (per brick)")
-    st.dataframe(pd.DataFrame(variance_rows), width="stretch")
+    st.dataframe(pd.DataFrame(variance_rows), use_container_width=True)
 
     st.subheader("Cost per Brick")
     cost_df = pd.DataFrame(cost_rows)
@@ -370,7 +361,7 @@ def render() -> None:
         "Actual_Cost": round(sum(row["Actual_Cost"] for row in cost_rows), 2),
         "Cost_per_Brick": round(total_cost_per_brick, 4),
     }
-    st.dataframe(cost_df, width="stretch")
+    st.dataframe(cost_df, use_container_width=True)
 
     st.subheader("Diagnostic KPI Report")
     diagnostic_rows = [
@@ -411,7 +402,7 @@ def render() -> None:
             "Variance_%": f"{stonedust_variance_pct:.1%}",
         },
     ]
-    st.dataframe(pd.DataFrame(diagnostic_rows), width="stretch")
+    st.dataframe(pd.DataFrame(diagnostic_rows), use_container_width=True)
 
     st.subheader("Alerts")
     if alerts:

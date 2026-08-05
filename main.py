@@ -1,21 +1,36 @@
+import importlib
+from typing import Callable
+
 import streamlit as st
 
+import app_logging
 import database
-from pages import (
-    collections_reconciliation,
-    dashboard,
-    dashboard_1,
-    expenses,
-    labour_attendance,
-    master_data,
-    payments,
-    production_entry,
-    raw_material_entry,
-    raw_material_reconciliation,
-    sales_entry,
-    stock,
-    weekly_planner,
-)
+
+logger = app_logging.get_logger("main")
+
+PAGE_MODULES: dict[str, str] = {
+    "Dashboard": "pages.dashboard",
+    "Dashboard-1": "pages.dashboard_1",
+    "Labour Attendance": "pages.labour_attendance",
+    "Raw Material Entry": "pages.raw_material_entry",
+    "Production Entry": "pages.production_entry",
+    "Stock": "pages.stock",
+    "Sales Entry": "pages.sales_entry",
+    "Payments": "pages.payments",
+    "Expenses": "pages.expenses",
+    "Collections & Reconciliation": "pages.collections_reconciliation",
+    "Raw Material Reconciliation": "pages.raw_material_reconciliation",
+    "Weekly Planner": "pages.weekly_planner",
+    "Master Data": "pages.master_data",
+}
+
+
+def _load_page_renderer(page: str) -> Callable[[], None] | None:
+    module_path = PAGE_MODULES.get(page)
+    if not module_path:
+        return None
+    module = importlib.import_module(module_path)
+    return getattr(module, "render", None)
 
 
 def _init_connection() -> bool:
@@ -43,19 +58,24 @@ def _init_connection() -> bool:
             missing.append("gsheets.spreadsheet_id or gsheets.spreadsheet_url")
         st.sidebar.error("Google Sheets connection failed")
         st.sidebar.caption(f"Missing {', '.join(missing)} in secrets.")
+        app_logging.log_event(logger, "gsheets_config_missing", missing=missing)
         return False
 
     try:
-        database.get_spreadsheet()
+        database.ensure_gsheets_connection()
         st.sidebar.success("Connected to Google Sheets")
         return True
     except Exception as exc:  # noqa: BLE001 - surface connection errors in UI
         st.sidebar.error("Google Sheets connection failed")
         st.sidebar.caption(str(exc))
+        app_logging.log_event(logger, "gsheets_connection_failed", error=str(exc))
         return False
 
 
 def main() -> None:
+    app_logging.setup_logging()
+    app_logging.log_event(logger, "app_start")
+
     st.set_page_config(
         page_title="Fly-Ash Brick Management",
         page_icon="F",
@@ -100,6 +120,7 @@ spreadsheet_id = "YOUR_SHEET_ID"
     if st.sidebar.button("Refresh data"):
         database.clear_read_cache()
         st.sidebar.success("Cache cleared")
+        app_logging.log_event(logger, "manual_cache_refresh")
 
     if "page" not in st.session_state:
         st.session_state["page"] = "Dashboard"
@@ -137,26 +158,14 @@ spreadsheet_id = "YOUR_SHEET_ID"
         _nav_button("Master Data")
 
     page = st.session_state["page"]
-    router = {
-        "Dashboard": dashboard.render,
-        "Dashboard-1": dashboard_1.render,
-        "Labour Attendance": labour_attendance.render,
-        "Raw Material Entry": raw_material_entry.render,
-        "Production Entry": production_entry.render,
-        "Stock": stock.render,
-        "Sales Entry": sales_entry.render,
-        "Payments": payments.render,
-        "Expenses": expenses.render,
-        "Collections & Reconciliation": collections_reconciliation.render,
-        "Raw Material Reconciliation": raw_material_reconciliation.render,
-        "Weekly Planner": weekly_planner.render,
-        "Master Data": master_data.render,
-    }
-    handler = router.get(page)
+    handler = _load_page_renderer(page)
     if handler:
+        app_logging.log_event(logger, "page_render_start", page=page)
         handler()
+        app_logging.log_event(logger, "page_render_complete", page=page)
     else:
         st.error("Page not found.")
+        app_logging.log_event(logger, "page_not_found", page=page)
 
 
 if __name__ == "__main__":

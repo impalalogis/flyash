@@ -18,6 +18,78 @@ import pandas as pd
 
 GST_INVOICE_ALLOWED_PATTERN = re.compile(r"^[A-Za-z0-9/-]+$")
 
+DATE_FORMAT_ISO = "%Y-%m-%d"
+DATE_FORMAT_DMY = "%d-%m-%Y"
+DATE_FORMAT_DMY_SLASH = "%d/%m/%Y"
+DATE_FORMAT_DMY_SHORT = "%d-%m-%y"
+DATE_FORMAT_MDY = "%m-%d-%Y"
+DATE_FORMAT_DMONY = "%d-%b-%Y"
+
+DATE_FORMATS_DAYFIRST = (
+    DATE_FORMAT_DMY,
+    DATE_FORMAT_DMY_SLASH,
+    DATE_FORMAT_DMY_SHORT,
+    DATE_FORMAT_DMONY,
+    DATE_FORMAT_ISO,
+    DATE_FORMAT_MDY,
+)
+
+
+def to_datetime_explicit(value: object, *, dayfirst: bool = True) -> pd.Timestamp:
+    if isinstance(value, (date, datetime, pd.Timestamp)):
+        return pd.Timestamp(value)
+    value_str = str(value).strip()
+    if not value_str or value_str.lower() in {"nat", "none", "nan"}:
+        return pd.NaT
+    formats = DATE_FORMATS_DAYFIRST if dayfirst else tuple(reversed(DATE_FORMATS_DAYFIRST))
+    for fmt in formats:
+        parsed = pd.to_datetime(value_str, errors="coerce", format=fmt)
+        if pd.notna(parsed):
+            return parsed
+    return pd.to_datetime(value_str, errors="coerce", dayfirst=dayfirst)
+
+
+def to_datetime_series_explicit(
+    series: pd.Series,
+    *,
+    dayfirst: bool = True,
+) -> pd.Series:
+    if series.empty:
+        return pd.to_datetime(series, errors="coerce")
+    result = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    remaining_mask = series.notna() & (series.astype(str).str.strip() != "")
+    formats = DATE_FORMATS_DAYFIRST if dayfirst else tuple(reversed(DATE_FORMATS_DAYFIRST))
+    for fmt in formats:
+        if not remaining_mask.any():
+            break
+        parsed = pd.to_datetime(series.loc[remaining_mask], errors="coerce", format=fmt)
+        matched = parsed.notna()
+        if matched.any():
+            matched_index = parsed.index[matched]
+            result.loc[matched_index] = parsed.loc[matched_index]
+            remaining_mask.loc[matched_index] = False
+    if remaining_mask.any():
+        fallback = pd.to_datetime(
+            series.loc[remaining_mask],
+            errors="coerce",
+            dayfirst=dayfirst,
+        )
+        result.loc[remaining_mask] = fallback
+    return result
+
+
+def parse_date_value(value: object, *, dayfirst: bool = True) -> date | None:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if value in ("", None):
+        return None
+    parsed = to_datetime_explicit(value, dayfirst=dayfirst)
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
 
 def safe_float(value: object, default: float = 0.0) -> float:
     try:
@@ -219,16 +291,16 @@ def parse_date_series(
     dayfirst: bool = False,
     month_hint: pd.Series | None = None,
 ) -> pd.Series:
-    parsed_dayfirst = pd.to_datetime(series, errors="coerce", dayfirst=dayfirst)
+    parsed_dayfirst = to_datetime_series_explicit(series, dayfirst=dayfirst)
     if month_hint is None:
         if parsed_dayfirst.isna().any():
-            parsed_monthfirst = pd.to_datetime(
-                series, errors="coerce", dayfirst=not dayfirst
+            parsed_monthfirst = to_datetime_series_explicit(
+                series, dayfirst=not dayfirst
             )
             parsed_dayfirst = parsed_dayfirst.fillna(parsed_monthfirst)
         return parsed_dayfirst
 
-    parsed_monthfirst = pd.to_datetime(series, errors="coerce", dayfirst=not dayfirst)
+    parsed_monthfirst = to_datetime_series_explicit(series, dayfirst=not dayfirst)
     hint_months = pd.to_numeric(month_hint.apply(_month_hint_number), errors="coerce")
     day_month = parsed_dayfirst.dt.month
     month_month = parsed_monthfirst.dt.month
@@ -906,8 +978,8 @@ def generate_customer_ledger_pdf(
         total_due = float(pd.to_numeric(ledger_df.get("Due", 0), errors="coerce").fillna(0).sum())
 
     def _format_date(value):
-        parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
-        return parsed.strftime("%d-%b-%Y") if not pd.isna(parsed) else str(value)
+        parsed = to_datetime_explicit(value, dayfirst=True)
+        return parsed.strftime(DATE_FORMAT_DMONY) if not pd.isna(parsed) else str(value)
 
     # HEADER
     pdf.setFont("Helvetica-Bold", 14)
@@ -1162,10 +1234,9 @@ def compute_stock_log(raw_df: pd.DataFrame, production_df: pd.DataFrame) -> pd.D
         ["Date", "Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption"],
     )
 
-    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
-    production_df["Date"] = pd.to_datetime(
+    raw_df["Date"] = to_datetime_series_explicit(raw_df["Date"], dayfirst=True).dt.date
+    production_df["Date"] = to_datetime_series_explicit(
         production_df["Date"],
-        errors="coerce",
         dayfirst=True,
     ).dt.date
     raw_df = raw_df.dropna(subset=["Date"])

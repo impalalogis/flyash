@@ -23,16 +23,7 @@ BANK_COLUMNS = [
 
 
 def _parse_date(value: object) -> date | None:
-    if isinstance(value, date):
-        return value
-    if isinstance(value, datetime):
-        return value.date()
-    if value is None or value == "":
-        return None
-    try:
-        return pd.to_datetime(str(value), errors="coerce", dayfirst=True).date()
-    except Exception:
-        return None
+    return utils.parse_date_value(value, dayfirst=True)
 
 
 def _parse_payment_range(value: object) -> date | None:
@@ -42,7 +33,7 @@ def _parse_payment_range(value: object) -> date | None:
     if " - " in value_str:
         value_str = value_str.split(" - ", 1)[0].strip()
     try:
-        return pd.to_datetime(value_str, errors="coerce", dayfirst=True).date()
+        return utils.parse_date_value(value_str, dayfirst=True)
     except Exception:
         return None
 
@@ -78,7 +69,7 @@ def _match_amount_date(
     if txn_date is None:
         return pd.DataFrame(columns=expected.columns)
     delta = pd.to_timedelta(window_days, unit="D")
-    dates = pd.to_datetime(expected[date_col], errors="coerce")
+    dates = utils.to_datetime_series_explicit(expected[date_col])
     amount_match = expected[amount_col].between(amount - tolerance, amount + tolerance)
     date_match = (dates >= pd.Timestamp(txn_date) - delta) & (dates <= pd.Timestamp(txn_date) + delta)
     return expected[amount_match & date_match].copy()
@@ -112,7 +103,7 @@ def render() -> None:
     edited = st.data_editor(
         bank_df,
         num_rows="dynamic",
-        width="stretch",
+        use_container_width=True,
         key="bank_statement_editor",
     )
 
@@ -158,15 +149,18 @@ def render() -> None:
 
     bank_clean = bank_df.copy()
     bank_clean = utils.coerce_numeric_columns(bank_clean, ["Debit", "Credit", "Balance"])
-    bank_clean["Date"] = pd.to_datetime(bank_clean["Date"], errors="coerce", dayfirst=True).dt.date
+    bank_clean["Date"] = utils.to_datetime_series_explicit(bank_clean["Date"], dayfirst=True).dt.date
     bank_clean["Text"] = bank_clean.apply(_bank_text, axis=1)
 
-    sales_df = database.read_table("Sales_Log")
+    tables = database.read_tables(
+        ["Sales_Log", "Raw_Material_Log", "Production_Log", "Suppliers"]
+    )
+    sales_df = tables["Sales_Log"]
     sales_df = utils.ensure_columns(
         sales_df,
         ["Sales_ID", "Date", "Customer_ID", "Invoice_No", "Total_Amount", "No_of_Bricks"],
     )
-    sales_df["Date"] = pd.to_datetime(sales_df["Date"], errors="coerce", dayfirst=True).dt.date
+    sales_df["Date"] = utils.to_datetime_series_explicit(sales_df["Date"], dayfirst=True).dt.date
     sales_df["Total_Amount"] = utils.to_numeric_series(
         sales_df.get("Total_Amount", pd.Series(dtype=float))
     ).fillna(0.0)
@@ -178,18 +172,18 @@ def render() -> None:
     sales_df.loc[sales_df["Invoice_Key"] == "", "Invoice_Key"] = sales_df["Sales_ID"].astype(str)
     sales_expected = sales_df[sales_df["Invoice_Key"].astype(str).str.strip() != ""].copy()
 
-    raw_df = database.read_table("Raw_Material_Log")
+    raw_df = tables["Raw_Material_Log"]
     raw_df = utils.ensure_columns(
         raw_df,
         ["RM_ID", "Date", "Supplier_ID", "Material", "Amount_Paid"],
     )
-    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
+    raw_df["Date"] = utils.to_datetime_series_explicit(raw_df["Date"], dayfirst=True).dt.date
     raw_df["Amount_Paid"] = utils.to_numeric_series(
         raw_df.get("Amount_Paid", pd.Series(dtype=float))
     ).fillna(0.0)
     supplier_expected = raw_df[raw_df["Amount_Paid"] > 0].copy()
 
-    suppliers = database.read_table("Suppliers")
+    suppliers = tables["Suppliers"]
     suppliers = utils.ensure_columns(suppliers, ["Supplier_ID", "Name"])
     supplier_name_map = (
         suppliers.set_index("Supplier_ID")["Name"].astype(str).str.strip().to_dict()
@@ -198,7 +192,7 @@ def render() -> None:
     )
     supplier_expected["Supplier_Name"] = supplier_expected["Supplier_ID"].map(supplier_name_map).fillna("")
 
-    production_df = database.read_table("Production_Log")
+    production_df = tables["Production_Log"]
     production_df = utils.ensure_columns(
         production_df,
         ["Prod_ID", "Date", "Labour_Payment_Date", "Actual_Payment_Amount"],
@@ -207,9 +201,8 @@ def render() -> None:
         production_df.get("Actual_Payment_Amount", pd.Series(dtype=float))
     ).fillna(0.0)
     production_df["Payment_Date"] = production_df["Labour_Payment_Date"].apply(_parse_payment_range)
-    production_df.loc[production_df["Payment_Date"].isna(), "Payment_Date"] = pd.to_datetime(
+    production_df.loc[production_df["Payment_Date"].isna(), "Payment_Date"] = utils.to_datetime_series_explicit(
         production_df["Date"],
-        errors="coerce",
         dayfirst=True,
     ).dt.date
     labour_expected = production_df[production_df["Actual_Payment_Amount"] > 0].copy()
@@ -243,7 +236,7 @@ def render() -> None:
             )
             if not candidates.empty:
                 candidates = candidates.assign(
-                    date_diff=(pd.to_datetime(candidates["Date"]) - pd.Timestamp(row["Date"])).abs()
+                    date_diff=(utils.to_datetime_series_explicit(candidates["Date"]) - pd.Timestamp(row["Date"])).abs()
                 )
                 matched = candidates.sort_values("date_diff").iloc[0]["Invoice_Key"]
                 method = "Amount+Date"
@@ -282,7 +275,7 @@ def render() -> None:
         )
         if not candidates.empty:
             candidates = candidates.assign(
-                date_diff=(pd.to_datetime(candidates["Date"]) - pd.Timestamp(row["Date"])).abs()
+                date_diff=(utils.to_datetime_series_explicit(candidates["Date"]) - pd.Timestamp(row["Date"])).abs()
             )
             chosen = candidates.sort_values("date_diff").iloc[0]
             matched_id = str(chosen.get("RM_ID", ""))
@@ -417,7 +410,7 @@ def render() -> None:
         ]
     ].copy()
     st.markdown("**Matched transactions**")
-    st.dataframe(matched_view, width="stretch")
+    st.dataframe(matched_view, use_container_width=True)
 
     st.markdown("**Unmatched bank transactions**")
     if unmatched_bank.empty:
@@ -428,7 +421,7 @@ def render() -> None:
             unmatched_bank[
                 ["Txn_ID", "Date", "Narration", "Debit", "Credit", "Category"]
             ],
-            width="stretch",
+            use_container_width=True,
         )
 
     st.markdown("**Pending receipts (Sales invoices)**")
@@ -440,7 +433,7 @@ def render() -> None:
             pending_receipts[
                 ["Invoice_Key", "Customer_ID", "Total_Amount", "Matched_Amount", "Status"]
             ],
-            width="stretch",
+            use_container_width=True,
         )
 
     st.markdown("**Pending payments (Suppliers)**")
@@ -452,7 +445,7 @@ def render() -> None:
             pending_payments[
                 ["RM_ID", "Supplier_ID", "Amount_Paid", "Matched_Amount", "Status"]
             ],
-            width="stretch",
+            use_container_width=True,
         )
 
     st.markdown("**Suspicious entries**")
@@ -472,7 +465,7 @@ def render() -> None:
     else:
         st.dataframe(
             suspicious[["Type", "Invoice_Key", "Total_Amount", "Matched_Amount", "Status"]],
-            width="stretch",
+            use_container_width=True,
         )
 
     st.subheader("Recommendations to improve reconciliation accuracy")
