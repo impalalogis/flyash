@@ -10,7 +10,10 @@ import pandas as pd
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
+import app_logging
 import utils
+
+logger = app_logging.get_logger("database")
 
 ID_COLUMNS = {
     "Suppliers": "Supplier_ID",
@@ -81,7 +84,24 @@ def get_client() -> gspread.Client:
 def get_spreadsheet() -> gspread.Spreadsheet:
     client = get_client()
     spreadsheet_id = _get_spreadsheet_id()
-    return client.open_by_key(spreadsheet_id)
+    spreadsheet = client.open_by_key(spreadsheet_id)
+    app_logging.log_event(
+        logger,
+        "google_sheets_connection_initialized",
+        spreadsheet_id=spreadsheet_id,
+    )
+    return spreadsheet
+
+
+def ensure_gsheets_connection() -> gspread.Spreadsheet:
+    """Return a cached Google Sheets connection initialized once per app session."""
+    if "gsheets_connection_ready" not in st.session_state:
+        st.session_state["gsheets_connection_ready"] = False
+    spreadsheet = get_spreadsheet()
+    if not st.session_state["gsheets_connection_ready"]:
+        st.session_state["gsheets_connection_ready"] = True
+        app_logging.log_event(logger, "google_sheets_connection_ready")
+    return spreadsheet
 
 
 def _get_worksheet(table_name: str) -> gspread.Worksheet:
@@ -182,18 +202,44 @@ def _read_table_cached(table_name: str, spreadsheet_id: str) -> pd.DataFrame:
 
 def read_table(table_name: str) -> pd.DataFrame:
     spreadsheet_id = _get_spreadsheet_id()
+    app_logging.log_event(logger, "read_table", table=table_name)
     return _read_table_cached(table_name, spreadsheet_id).copy()
+
+
+@st.cache_data(ttl=READ_CACHE_TTL, show_spinner=False)
+def read_tables_cached(
+    table_names: tuple[str, ...],
+    spreadsheet_id: str,
+) -> dict[str, pd.DataFrame]:
+    return {
+        table_name: _read_table_cached(table_name, spreadsheet_id).copy()
+        for table_name in table_names
+    }
+
+
+def read_tables(table_names: list[str] | tuple[str, ...]) -> dict[str, pd.DataFrame]:
+    spreadsheet_id = _get_spreadsheet_id()
+    return read_tables_cached(tuple(table_names), spreadsheet_id)
+
+
+@st.cache_data(ttl=READ_CACHE_TTL, show_spinner=False)
+def compute_stock_log_cached(spreadsheet_id: str) -> pd.DataFrame:
+    raw_df = _read_table_cached("Raw_Material_Log", spreadsheet_id).copy()
+    production_df = _read_table_cached("Production_Log", spreadsheet_id).copy()
+    return utils.compute_stock_log(raw_df, production_df)
 
 
 def clear_read_cache() -> None:
     _read_table_cached.clear()
+    read_tables_cached.clear()
+    compute_stock_log_cached.clear()
+    app_logging.log_event(logger, "read_cache_cleared")
 
 
 def update_stock_log() -> None:
     clear_read_cache()
-    raw_df = read_table("Raw_Material_Log")
-    production_df = read_table("Production_Log")
-    stock_df = utils.compute_stock_log(raw_df, production_df)
+    spreadsheet_id = _get_spreadsheet_id()
+    stock_df = compute_stock_log_cached(spreadsheet_id)
     replace_table("Stock_Log", stock_df, recompute_stock=False)
 
 

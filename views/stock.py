@@ -20,7 +20,7 @@ def render() -> None:
         st.info("No stock data available.")
         return
 
-    stock_df["Date"] = pd.to_datetime(stock_df["Date"], errors="coerce").dt.date
+    stock_df["Date"] = utils.to_datetime_series_explicit(stock_df["Date"]).dt.date
     stock_df = stock_df.dropna(subset=["Date"])
 
     materials = sorted(stock_df["Material"].astype(str).dropna().unique().tolist())
@@ -47,7 +47,7 @@ def render() -> None:
         .tail(1)
         .sort_values("Material")
     )
-    st.dataframe(latest, width="stretch")
+    st.dataframe(latest, use_container_width=True)
 
     st.subheader("Stock Log")
-    st.dataframe(filtered.sort_values(["Date", "Material"]), width="stretch")
+    st.dataframe(filtered.sort_values(["Date", "Material"]), use_container_width=True)

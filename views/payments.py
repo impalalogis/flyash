@@ -37,7 +37,7 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
 def _format_date_value(value: object) -> str:
     if isinstance(value, date):
         return value.isoformat()
-    parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
+    parsed = utils.to_datetime_series_explicit(str(value), dayfirst=True)
     if pd.isna(parsed):
         return str(value)
     return parsed.date().isoformat()
@@ -366,7 +366,7 @@ def render() -> None:
         display_df["Customer_ID"] = display_df["Customer_ID"].map(
             lambda value: customer_label_map.get(value, value)
         )
-    st.dataframe(display_df, width="stretch")
+    st.dataframe(display_df, use_container_width=True)
 
     st.subheader("Reconcile Pending Payments")
     if st.button("Run reconciliation", key="payments_reconcile"):
@@ -398,7 +398,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        width="stretch",
+        use_container_width=True,
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="payments_entries",
     )
@@ -441,11 +441,11 @@ def render() -> None:
     mask, errors = utils.build_validation_mask(entries, rules)
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            width="stretch",
+            use_container_width=True,
             disabled=["Payment_ID"],
             key="payments_invalid_editor",
         )

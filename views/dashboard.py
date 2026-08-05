@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 import database
+import display_utils
 import utils
 
 
@@ -27,8 +28,8 @@ def _filter_by_date(data_frame: pd.DataFrame, column: str, start: date, end: dat
         return data_frame
     month_hint = data_frame["Month"] if "Month" in data_frame.columns else None
     series = utils.parse_date_series(data_frame[column], month_hint=month_hint)
-    start_ts = pd.to_datetime(start)
-    end_ts = pd.to_datetime(end)
+    start_ts = pd.to_datetime(start, format=utils.DATE_FORMAT_ISO)
+    end_ts = pd.to_datetime(end, format=utils.DATE_FORMAT_ISO)
     return data_frame[(series >= start_ts) & (series <= end_ts)]
 
 
@@ -51,7 +52,7 @@ def _add_period_column(data_frame: pd.DataFrame, column: str, period: str) -> pd
         return data_frame
     freq = {"Monthly": "M", "Quarterly": "Q", "Yearly": "Y"}[period]
     data_frame = data_frame.copy()
-    dt = pd.to_datetime(data_frame[column], errors="coerce", dayfirst=True)
+    dt = utils.to_datetime_series_explicit(data_frame[column], dayfirst=True)
     data_frame["Period"] = dt.dt.to_period(freq).astype('string')
     data_frame = data_frame[data_frame["Period"] != "NaT"]
     return data_frame
@@ -250,7 +251,7 @@ def _period_totals(
     if data_frame.empty or date_col not in data_frame.columns:
         return pd.DataFrame(columns=["Period", "Period_Label", label])
     frame = data_frame.copy()
-    dt = pd.to_datetime(frame[date_col], errors="coerce", dayfirst=True)
+    dt = utils.to_datetime_series_explicit(frame[date_col], dayfirst=True)
     frame["Period"] = dt.dt.to_period(freq)
     frame = frame[frame["Period"].notna()]
     frame[label] = utils.to_numeric_series(
@@ -276,7 +277,7 @@ def _period_day_counts(
     if filter_column and filter_column in frame.columns:
         values = utils.to_numeric_series(frame.get(filter_column, pd.Series(dtype=float))).fillna(0.0)
         frame = frame[values > 0]
-    dt = pd.to_datetime(frame[date_col], errors="coerce", dayfirst=True)
+    dt = utils.to_datetime_series_explicit(frame[date_col], dayfirst=True)
     frame["Period"] = dt.dt.to_period(freq)
     frame = frame[frame["Period"].notna()]
     frame["DateOnly"] = dt.dt.date
@@ -419,10 +420,25 @@ def _format_change(change: dict | None) -> str:
     return f"{change['current']:,.0f} ({pct_str})"
 
 
+def _load_dashboard_tables() -> dict[str, pd.DataFrame]:
+    return database.read_tables(
+        [
+            "Raw_Material_Log",
+            "Production_Log",
+            "Sales_Log",
+            "Expenses",
+            "Stock_Log",
+            "Customers",
+            "Payments",
+        ]
+    )
+
+
 def render() -> None:
     st.header("Dashboard")
 
-    raw_materials = _parse_dates(database.read_table("Raw_Material_Log"), "Date")
+    tables = _load_dashboard_tables()
+    raw_materials = _parse_dates(tables["Raw_Material_Log"], "Date")
     raw_materials = utils.coerce_numeric_columns(
         raw_materials,
         [
@@ -440,7 +456,7 @@ def render() -> None:
             "Total_Cost",
         ],
     )
-    production = _parse_dates(database.read_table("Production_Log"), "Date")
+    production = _parse_dates(tables["Production_Log"], "Date")
     production = utils.coerce_numeric_columns(
         production,
         [
@@ -454,7 +470,7 @@ def render() -> None:
             "Actual_Payment_Amount",
         ],
     )
-    sales = _parse_dates(database.read_table("Sales_Log"), "Date")
+    sales = _parse_dates(tables["Sales_Log"], "Date")
     sales = utils.coerce_numeric_columns(
         sales,
         [
@@ -472,7 +488,7 @@ def render() -> None:
     )
     sales = sales.copy()
     sales["No_of_Bricks"] = _sales_bricks_series(sales)
-    expenses = _parse_dates(database.read_table("Expenses"), "Date")
+    expenses = _parse_dates(tables["Expenses"], "Date")
     expenses = utils.coerce_numeric_columns(
         expenses,
         [
@@ -493,13 +509,13 @@ def render() -> None:
         expenses["Expense_Type"] = (
             expenses["Expense_Type"].astype(str).str.strip().replace("", "Unspecified")
         )
-    stock_log = _parse_dates(database.read_table("Stock_Log"), "Date")
+    stock_log = _parse_dates(tables["Stock_Log"], "Date")
     stock_log = utils.coerce_numeric_columns(
         stock_log,
         ["Opening", "Inward", "Consumed", "Closing"],
     )
-    customers = database.read_table("Customers")
-    payments = database.read_table("Payments")
+    customers = tables["Customers"]
+    payments = tables["Payments"]
 
     all_dates = []
     for frame in [raw_materials, production, sales, expenses]:
@@ -713,7 +729,7 @@ def render() -> None:
             "Amount (₹)": f"{profit:,.0f}",
         },
     ]
-    st.dataframe(pd.DataFrame(summary_rows), width="stretch")
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
 
     st.subheader("Customer Outstanding and Stock")
     col1, col2 = st.columns(2)
@@ -796,7 +812,7 @@ def render() -> None:
                     "Advance_Credit",
                 ]
             ]
-            st.dataframe(customer_view, width="stretch")
+            display_utils.render_dataframe(customer_view, use_container_width=True)
 
     with col2:
         if stock_log.empty:
@@ -812,7 +828,7 @@ def render() -> None:
                 .tail(1)
                 .sort_values("Material")
             )
-            st.dataframe(latest_stock, width="stretch")
+            st.dataframe(latest_stock, use_container_width=True)
 
     if not stock_log.empty:
         stock_chart = (
@@ -864,9 +880,8 @@ def render() -> None:
         labour_period["No_of_Labour"] = utils.to_numeric_series(
             labour_period.get("No_of_Labour", pd.Series(dtype=float))
         ).fillna(0.0)
-        labour_period["Date"] = pd.to_datetime(
+        labour_period["Date"] = utils.to_datetime_series_explicit(
             labour_period.get("Date", pd.Series(dtype=str)),
-            errors="coerce",
             dayfirst=True,
         ).dt.date
         expenses_period = _add_period_column(expenses_filtered, "Date", period)
@@ -1328,7 +1343,7 @@ def render() -> None:
                         "Gap (Bricks)": f"{gap:,.0f}" if gap is not None else "n/a",
                     }
                 )
-            st.dataframe(pd.DataFrame(trend_rows), width="stretch")
+            st.dataframe(pd.DataFrame(trend_rows), use_container_width=True)
 
             col1, col2 = st.columns(2)
             with col1:
@@ -1336,14 +1351,14 @@ def render() -> None:
                 over = monthly_summary.sort_values("Gap", ascending=False).head(3)
                 st.dataframe(
                     over[["Period_Label", "Production", "Sales", "Gap"]],
-                    width="stretch",
+                    use_container_width=True,
                 )
             with col2:
                 st.markdown("**Months where sales exceeded production**")
                 under = monthly_summary.sort_values("Gap").head(3)
                 st.dataframe(
                     under[["Period_Label", "Production", "Sales", "Gap"]],
-                    width="stretch",
+                    use_container_width=True,
                 )
 
             if not monthly_summary.empty and monthly_summary["Conversion"].notna().any():
@@ -1381,7 +1396,7 @@ def render() -> None:
                     }
                 )
             if rows:
-                st.dataframe(pd.DataFrame(rows), width="stretch")
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
             else:
                 st.info("Not enough monthly data to identify best/worst months.")
 
@@ -1390,9 +1405,8 @@ def render() -> None:
             if consumption.empty:
                 st.info("No production data available for material insights.")
             else:
-                consumption["Period"] = pd.to_datetime(
+                consumption["Period"] = utils.to_datetime_series_explicit(
                     consumption.get("Date", pd.Series(dtype=str)),
-                    errors="coerce",
                     dayfirst=True,
                 ).dt.to_period("M")
                 material_cols = {
@@ -1442,7 +1456,7 @@ def render() -> None:
                         }
                     )
                 st.markdown("**Procurement calendar (based on peak usage)**")
-                st.dataframe(pd.DataFrame(procurement_rows), width="stretch")
+                st.dataframe(pd.DataFrame(procurement_rows), use_container_width=True)
 
                 recent_months = monthly_material.tail(3)
                 if not recent_months.empty and recent_months["No_of_Bricks"].sum() > 0:
@@ -1458,7 +1472,7 @@ def render() -> None:
                             }
                         )
                     st.markdown("**Next-month material requirement (simple forecast)**")
-                    st.dataframe(pd.DataFrame(forecast_rows), width="stretch")
+                    st.dataframe(pd.DataFrame(forecast_rows), use_container_width=True)
 
                 st.markdown("**Reconciliation snapshot (tons + kg/brick)**")
                 standard = {
@@ -1532,7 +1546,7 @@ def render() -> None:
                         "Stone Dust": "tons/brick",
                     }
                 )
-                st.dataframe(stock_df, width="stretch")
+                display_utils.render_dataframe(stock_df, use_container_width=True)
 
                 alerts = []
                 for row in stock_rows:
@@ -1555,20 +1569,20 @@ def render() -> None:
                     for label, value in cost_rows
                 ]
             )
-            st.dataframe(cost_table, width="stretch")
+            st.dataframe(cost_table, use_container_width=True)
 
             if not expense_category_summary.empty:
                 st.markdown("**Expenses by category**")
-                st.dataframe(expense_category_summary, width="stretch")
+                st.dataframe(expense_category_summary, use_container_width=True)
             if not expense_type_summary.empty:
                 st.markdown("**Expenses by type (short-term / long-term)**")
-                st.dataframe(expense_type_summary, width="stretch")
+                st.dataframe(expense_type_summary, use_container_width=True)
 
             top_cost = cost_month.sort_values("Cost_per_Brick", ascending=False).head(3)
             st.markdown("**Highest cost per brick (monthly)**")
             st.dataframe(
                 top_cost[["Period_Label", "Cost_per_Brick", "Total_Cost"]],
-                width="stretch",
+                use_container_width=True,
             )
 
         with anomaly_tab:
@@ -1625,9 +1639,8 @@ def render() -> None:
 
             if not production_filtered.empty:
                 usage = production_filtered.copy()
-                usage["Period"] = pd.to_datetime(
+                usage["Period"] = utils.to_datetime_series_explicit(
                     usage.get("Date", pd.Series(dtype=str)),
-                    errors="coerce",
                     dayfirst=True,
                 ).dt.to_period("M")
                 usage["No_of_Bricks"] = utils.to_numeric_series(
@@ -1680,7 +1693,7 @@ def render() -> None:
                     )
 
             if anomalies:
-                st.dataframe(pd.DataFrame(anomalies), width="stretch")
+                st.dataframe(pd.DataFrame(anomalies), use_container_width=True)
             else:
                 st.info("No major anomalies detected in the selected range.")
 
@@ -1743,7 +1756,7 @@ def render() -> None:
             )
             st.dataframe(
                 days_month[["Period_Label", "Production_Days", "Sales_Days", "Days_Ratio"]],
-                width="stretch",
+                use_container_width=True,
             )
 
             st.markdown("**Quarterly production vs sales days**")
@@ -1761,7 +1774,7 @@ def render() -> None:
             )
             st.dataframe(
                 days_quarter[["Period_Label", "Production_Days", "Sales_Days", "Days_Ratio"]],
-                width="stretch",
+                use_container_width=True,
             )
 
             st.markdown("**Yearly production vs sales days**")
@@ -1779,7 +1792,7 @@ def render() -> None:
             )
             st.dataframe(
                 days_year[["Period_Label", "Production_Days", "Sales_Days", "Days_Ratio"]],
-                width="stretch",
+                use_container_width=True,
             )
 
             days_month = days_month.merge(
@@ -1821,7 +1834,7 @@ def render() -> None:
                         ],
                         ignore_index=True,
                     )[["Period_Label", "Production_Days", "Flag"]],
-                    width="stretch",
+                    use_container_width=True,
                 )
 
             low_sales_threshold = days_month["Sales_Days"].quantile(0.2) if not days_month.empty else None
@@ -1838,7 +1851,7 @@ def render() -> None:
                         ],
                         ignore_index=True,
                     )[["Period_Label", "Sales_Days", "Flag"]],
-                    width="stretch",
+                    use_container_width=True,
                 )
 
             st.markdown("**Profitability trends**")
@@ -1887,7 +1900,7 @@ def render() -> None:
                         "Profit_per_Brick",
                     ]
                 ],
-                width="stretch",
+                use_container_width=True,
             )
 
             profit_month["Cost_Change"] = profit_month["Total_Cost"].diff()
@@ -1899,7 +1912,7 @@ def render() -> None:
                 st.markdown("**Cost increased but profit did not**")
                 st.dataframe(
                     mismatch[["Period_Label", "Cost_Change", "Profit_Change"]],
-                    width="stretch",
+                    use_container_width=True,
                 )
             else:
                 st.caption("No periods where cost rose while profit fell.")
@@ -1936,7 +1949,7 @@ def render() -> None:
                     {"KPI": "Collection ratio", "Value": f"{collection_ratio:,.2f}"},
                 ]
             )
-            st.dataframe(pd.DataFrame(kpi_rows), width="stretch")
+            st.dataframe(pd.DataFrame(kpi_rows), use_container_width=True)
 
             conversion_ratio = (
                 total_sold_bricks / total_production if total_production else None
@@ -2120,7 +2133,7 @@ def render() -> None:
                     }
                 )
             st.markdown("**Diagnostic KPI report**")
-            st.dataframe(pd.DataFrame(diagnostic_rows), width="stretch")
+            st.dataframe(pd.DataFrame(diagnostic_rows), use_container_width=True)
 
             kpi_dictionary = [
                 {
@@ -2132,7 +2145,7 @@ def render() -> None:
                 for kpi in kpi_specs
             ]
             st.markdown("**KPI dictionary**")
-            st.dataframe(pd.DataFrame(kpi_dictionary), width="stretch")
+            st.dataframe(pd.DataFrame(kpi_dictionary), use_container_width=True)
 
             recommendations: list[str] = []
             if not prod_month.empty and not sales_month.empty:

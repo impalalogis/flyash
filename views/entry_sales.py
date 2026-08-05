@@ -172,18 +172,7 @@ def _sales_due_label(entries: pd.DataFrame) -> str:
 
 
 def _parse_date(value: object) -> date | None:
-    if isinstance(value, date):
-        return value
-    if value in ("", None):
-        return None
-    value_str = str(value).strip()
-    if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", value_str):
-        parsed = pd.to_datetime(value_str, errors="coerce", format="%Y-%m-%d")
-    else:
-        parsed = pd.to_datetime(value_str, errors="coerce", dayfirst=True)
-    if pd.isna(parsed):
-        return None
-    return parsed.date()
+    return utils.parse_date_value(value, dayfirst=True)
 
 
 def _format_sales_log_date(value: object) -> object:
@@ -586,7 +575,7 @@ def _build_customer_ledger(
     )
 
     ledger_df = pd.concat([sales_events, payment_events], ignore_index=True)
-    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce", dayfirst=True)
+    ledger_df["_sort_date"] = utils.to_datetime_series_explicit(ledger_df["Date"], dayfirst=True)
     ledger_df["_type_order"] = ledger_df["Type"].map({"Sale": 0, "Payment": 1}).fillna(2)
     ledger_df = ledger_df.sort_values(
         ["_sort_date", "_type_order", "Reference"],
@@ -603,6 +592,16 @@ def _build_customer_ledger(
         balances.append(running_balance)
     ledger_df["Running_Balance"] = balances
     return ledger_df.drop(columns=["_sort_date", "_type_order", "_applied"])
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _build_customer_ledger_cached(customer_id: str) -> pd.DataFrame:
+    tables = database.read_tables(["Sales_Log", "Payments"])
+    return _build_customer_ledger(
+        tables["Sales_Log"],
+        tables["Payments"],
+        customer_id,
+    )
 
 
 def _ledger_events(
@@ -749,7 +748,7 @@ def _ledger_events(
         )
 
     ledger_df = pd.DataFrame(events)
-    ledger_df["_sort_date"] = pd.to_datetime(ledger_df["Date"], errors="coerce", dayfirst=True)
+    ledger_df["_sort_date"] = utils.to_datetime_series_explicit(ledger_df["Date"], dayfirst=True)
     ledger_df["_sort_date"] = ledger_df["_sort_date"].fillna(pd.Timestamp.max)
     ledger_df["Reference"] = ledger_df["Reference"].astype(str)
     ledger_df = ledger_df.sort_values(
@@ -1079,7 +1078,7 @@ def render() -> None:
             display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
             edited = st.data_editor(
                 display_entries,
-                width="stretch",
+                use_container_width=True,
                 disabled=[col for col in display_entries.columns if col != "Delete"],
                 key="sales_entries",
             )
@@ -1410,7 +1409,7 @@ def render() -> None:
         customer_row = customers.loc[customers["Customer_ID"] == ledger_customer_id]
         customer_row = customer_row.iloc[0] if not customer_row.empty else pd.Series(dtype=object)
 
-        ledger_full = _build_customer_ledger(entries, payments_df, ledger_customer_id)
+        ledger_full = _build_customer_ledger_cached(ledger_customer_id)
         if ledger_full.empty:
             st.info("No ledger entries for the selected customer.")
         else:
@@ -1465,7 +1464,7 @@ def render() -> None:
                         "Running_Balance",
                     ]
                 ].rename(columns={"Date_Display": "Date", "Running_Balance": "Running Balance"})
-                st.dataframe(ledger_view, width="stretch")
+                st.dataframe(ledger_view, use_container_width=True)
 
                 file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
                 output = io.BytesIO()
@@ -1614,11 +1613,11 @@ def render() -> None:
 
         if mask.any().any():
             st.caption("Rows highlighted in red need correction. Calculated fields will be refreshed.")
-            st.dataframe(utils.style_invalid(entries, mask), width="stretch")
+            st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
             invalid_rows = entries[mask.any(axis=1)].copy()
             edited_invalid = st.data_editor(
                 invalid_rows,
-                width="stretch",
+                use_container_width=True,
                 disabled=["Sales_ID"],
                 key="sales_invalid_editor",
             )

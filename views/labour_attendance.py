@@ -56,7 +56,7 @@ def _sync_production_log(
     if production_df.empty:
         production_df = pd.DataFrame(columns=PRODUCTION_COLUMNS)
     production_df = utils.ensure_columns(production_df, PRODUCTION_COLUMNS)
-    prod_dates = pd.to_datetime(production_df["Date"], errors="coerce").dt.date
+    prod_dates = utils.to_datetime_series_explicit(production_df["Date"]).dt.date
     day_rows = production_df[prod_dates == attendance_date]
 
     avg_wage = utils.average_daily_wage(labour_df)
@@ -170,7 +170,7 @@ def render() -> None:
     grid_df = pd.DataFrame(grid_rows)
     edited = st.data_editor(
         grid_df,
-        width="stretch",
+        use_container_width=True,
         disabled=["Labour_ID", "Name"],
         column_config={
             "Present": st.column_config.CheckboxColumn("Present"),
@@ -234,4 +234,4 @@ def render() -> None:
     if log.empty:
         st.info("No attendance logged for this date.")
     else:
-        st.dataframe(log, width="stretch")
+        st.dataframe(log, use_container_width=True)

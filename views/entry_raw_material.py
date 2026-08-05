@@ -10,16 +10,7 @@ import utils
 
 
 def _parse_date(value: object) -> date | None:
-    if isinstance(value, date):
-        return value
-    if isinstance(value, datetime):
-        return value.date()
-    if value in ("", None):
-        return None
-    try:
-        return pd.to_datetime(str(value), errors="coerce", dayfirst=True).date()
-    except Exception:
-        return None
+    return utils.parse_date_value(value, dayfirst=True)
 
 
 MATERIAL_TYPES = [
@@ -207,7 +198,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        width="stretch",
+        use_container_width=True,
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="raw_material_entries",
     )
@@ -267,11 +258,11 @@ def render() -> None:
 
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            width="stretch",
+            use_container_width=True,
             disabled=["RM_ID"],
             key="raw_material_invalid_editor",
         )
@@ -325,7 +316,7 @@ def render() -> None:
         st.info("No system stock data available yet.")
         return
     stock_df = utils.ensure_columns(stock_df, ["Date", "Material", "Closing"])
-    stock_df["Date"] = pd.to_datetime(stock_df["Date"], errors="coerce", dayfirst=True).dt.date
+    stock_df["Date"] = utils.to_datetime_series_explicit(stock_df["Date"], dayfirst=True).dt.date
     stock_df["Closing"] = utils.to_numeric_series(
         stock_df.get("Closing", pd.Series(dtype=float))
     ).fillna(0.0)
@@ -339,9 +330,8 @@ def render() -> None:
         physical_df,
         ["Date", "Material", "Physical_Stock_Tons"],
     )
-    physical_df["Date"] = pd.to_datetime(
+    physical_df["Date"] = utils.to_datetime_series_explicit(
         physical_df.get("Date", pd.Series(dtype=str)),
-        errors="coerce",
         dayfirst=True,
     ).dt.date
     physical_df["Physical_Stock_Tons"] = utils.to_numeric_series(
@@ -375,4 +365,4 @@ def render() -> None:
                 "Variance_%": f"{variance_pct:.1%}" if variance_pct is not None else "n/a",
             }
         )
-    st.dataframe(pd.DataFrame(rows), width="stretch")
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)

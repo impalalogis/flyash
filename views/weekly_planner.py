@@ -31,16 +31,7 @@ DEFAULT_CONFIG = {
 
 
 def _parse_date(value: object) -> date | None:
-    if isinstance(value, date):
-        return value
-    if isinstance(value, datetime):
-        return value.date()
-    if value in (None, ""):
-        return None
-    try:
-        return pd.to_datetime(str(value), errors="coerce", dayfirst=True).date()
-    except Exception:
-        return None
+    return utils.parse_date_value(value, dayfirst=True)
 
 
 def _get_config() -> dict[str, float]:
@@ -74,7 +65,7 @@ def _average_cost(raw_df: pd.DataFrame, material: str, window_days: int) -> floa
         return 0.0
     cutoff = date.today() - timedelta(days=window_days)
     raw_df = raw_df.copy()
-    raw_df["Date"] = pd.to_datetime(raw_df["Date"], errors="coerce", dayfirst=True).dt.date
+    raw_df["Date"] = utils.to_datetime_series_explicit(raw_df["Date"], dayfirst=True).dt.date
     raw_df = raw_df[raw_df["Date"] >= cutoff]
     raw_df = raw_df[raw_df["Material"].astype(str).str.strip().str.lower() == material.lower()]
     qty = utils.to_numeric_series(raw_df.get("Qty", pd.Series(dtype=float))).fillna(0.0)
@@ -88,7 +79,7 @@ def _latest_material_stock(stock_df: pd.DataFrame, material: str) -> float:
     if stock_df.empty:
         return 0.0
     stock_df = stock_df.copy()
-    stock_df["Date"] = pd.to_datetime(stock_df["Date"], errors="coerce", dayfirst=True).dt.date
+    stock_df["Date"] = utils.to_datetime_series_explicit(stock_df["Date"], dayfirst=True).dt.date
     stock_df = stock_df[stock_df["Material"].astype(str).str.strip().str.lower() == material.lower()]
     if stock_df.empty:
         return 0.0
@@ -111,7 +102,7 @@ def render() -> None:
         work_week_editor = st.data_editor(
             work_week_df,
             num_rows="dynamic",
-            width="stretch",
+            use_container_width=True,
             key="work_week_editor",
         )
         if st.button("Save Work Week", key="save_work_week"):
@@ -128,7 +119,7 @@ def render() -> None:
         holiday_editor = st.data_editor(
             holiday_df,
             num_rows="dynamic",
-            width="stretch",
+            use_container_width=True,
             key="holiday_editor",
         )
         if st.button("Save Holidays", key="save_holidays"):
@@ -150,7 +141,7 @@ def render() -> None:
     config_editor = st.data_editor(
         config_df,
         num_rows="dynamic",
-        width="stretch",
+        use_container_width=True,
         key="planning_config_editor",
     )
     if st.button("Save Planning Config", key="save_planning_config"):
@@ -172,7 +163,10 @@ def render() -> None:
         total_days = (week_end - week_start).days + 1
 
     holiday_df = holiday_df.copy()
-    holiday_df["Date"] = pd.to_datetime(holiday_df.get("Date", pd.Series(dtype=str)), errors="coerce", dayfirst=True).dt.date
+    holiday_df["Date"] = utils.to_datetime_series_explicit(
+        holiday_df.get("Date", pd.Series(dtype=str)),
+        dayfirst=True,
+    ).dt.date
     holiday_dates = holiday_df["Date"].dropna().tolist()
     holiday_count = sum(1 for day in holiday_dates if week_start <= day <= week_end)
     available_days = max(total_days - holiday_count, 0)
@@ -185,11 +179,11 @@ def render() -> None:
 
     production_df = database.read_table("Production_Log")
     production_df = utils.ensure_columns(production_df, ["Date", "No_of_Bricks", "Cement_Consumption", "FlyAsh_Consumption", "StoneDust_Consumption", "Labour_Expense", "No_of_Labour"])
-    production_df["Date"] = pd.to_datetime(production_df["Date"], errors="coerce", dayfirst=True).dt.date
+    production_df["Date"] = utils.to_datetime_series_explicit(production_df["Date"], dayfirst=True).dt.date
 
     sales_df = database.read_table("Sales_Log")
     sales_df = utils.ensure_columns(sales_df, ["Date", "No_of_Bricks", "Total_Amount", "Freight"])
-    sales_df["Date"] = pd.to_datetime(sales_df["Date"], errors="coerce", dayfirst=True).dt.date
+    sales_df["Date"] = utils.to_datetime_series_explicit(sales_df["Date"], dayfirst=True).dt.date
 
     raw_df = database.read_table("Raw_Material_Log")
     raw_df = utils.ensure_columns(raw_df, ["Date", "Material", "Qty", "Total_Cost"])
@@ -224,7 +218,7 @@ def render() -> None:
             {"Target": "Stretch", "Bricks": round(stretch_target, 0)},
         ]
     )
-    st.dataframe(production_plan, width="stretch")
+    st.dataframe(production_plan, use_container_width=True)
 
     cement_ratio = config.get("cement_per_brick", 0.0)
     if cement_ratio <= 0 and prod_window["No_of_Bricks"].sum() > 0:
@@ -259,7 +253,7 @@ def render() -> None:
             }
         )
     st.subheader("Procurement Plan")
-    st.dataframe(pd.DataFrame(procurement_rows), width="stretch")
+    st.dataframe(pd.DataFrame(procurement_rows), use_container_width=True)
 
     sales_days = sales_window.loc[sales_window["No_of_Bricks"] > 0, "Date"].nunique()
     avg_daily_sales = (
@@ -281,7 +275,7 @@ def render() -> None:
                 {"Metric": "Weekly sales target", "Value": round(sales_target, 0)},
             ]
         ),
-        width="stretch",
+        use_container_width=True,
     )
 
     avg_price = (
@@ -329,7 +323,7 @@ def render() -> None:
     budget_df = pd.DataFrame(
         [{"Cost": name, "Amount": round(value, 2)} for name, value in budget_rows]
     )
-    st.dataframe(budget_df, width="stretch")
+    st.dataframe(budget_df, use_container_width=True)
 
     st.subheader("Expected Revenue & Profit")
     st.dataframe(
@@ -340,7 +334,7 @@ def render() -> None:
                 {"Metric": "Average selling price per brick", "Value": round(avg_price, 2)},
             ]
         ),
-        width="stretch",
+        use_container_width=True,
     )
 
     st.subheader("Weekly Recommendations")

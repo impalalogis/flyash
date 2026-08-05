@@ -243,7 +243,7 @@ def render() -> None:
     display_entries = display_entries[["Delete"] + [col for col in entries.columns]]
     edited = st.data_editor(
         display_entries,
-        width="stretch",
+        use_container_width=True,
         disabled=[col for col in display_entries.columns if col != "Delete"],
         key="production_entries",
     )
@@ -296,11 +296,11 @@ def render() -> None:
     mask = utils.apply_invalid_mask(mask, "Contract_Rate", invalid_contract_rate)
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            width="stretch",
+            use_container_width=True,
             disabled=["Prod_ID"],
             key="production_invalid_editor",
         )
@@ -366,9 +366,8 @@ def render() -> None:
         if backfill_basis != "Contract":
             backfill_contract_rate = 0.0
 
-        date_series = pd.to_datetime(
+        date_series = utils.to_datetime_series_explicit(
             entries.get("Date", pd.Series(dtype=str)),
-            errors="coerce",
         ).dt.date
         valid_dates = date_series.dropna()
         if valid_dates.empty:
@@ -397,9 +396,8 @@ def render() -> None:
                         if column not in updated.columns:
                             updated[column] = ""
 
-                    dates = pd.to_datetime(
+                    dates = utils.to_datetime_series_explicit(
                         updated.get("Date", pd.Series(dtype=str)),
-                        errors="coerce",
                     ).dt.date
                     in_range = (dates >= start_date) & (dates <= end_date)
                     in_range = in_range.fillna(False)

@@ -114,7 +114,7 @@ def render() -> None:
         ],
         month_windows,
     )
-    st.dataframe(sales_recon, width="stretch")
+    st.dataframe(sales_recon, use_container_width=True)
 
     st.markdown("**Production Log**")
     production_recon = dashboard_view._reconciliation_monthly_table(
@@ -128,11 +128,11 @@ def render() -> None:
         ],
         month_windows,
     )
-    st.dataframe(production_recon, width="stretch")
+    st.dataframe(production_recon, use_container_width=True)
 
     st.markdown("**Raw Material Log**")
     raw_recon = dashboard_view._reconciliation_raw_material_table(raw_materials, month_windows)
-    st.dataframe(raw_recon, width="stretch")
+    st.dataframe(raw_recon, use_container_width=True)
 
     st.markdown("**Expenses Log**")
     expense_recon = dashboard_view._reconciliation_monthly_table(
@@ -145,7 +145,7 @@ def render() -> None:
         ],
         month_windows,
     )
-    st.dataframe(expense_recon, width="stretch")
+    st.dataframe(expense_recon, use_container_width=True)
 
     if "Verified" in expenses.columns and not expenses.empty:
         verified_clean = expenses["Verified"].astype(str).str.strip()
@@ -220,7 +220,7 @@ def render() -> None:
             if invalid_date.any():
                 st.dataframe(
                     _preview(frame[invalid_date].head(max_rows), [date_col]),
-                    width="stretch",
+                    use_container_width=True,
                 )
                 _record_issues(label, frame, invalid_date, date_col, "Invalid Date")
             for column in numeric_cols:
@@ -236,7 +236,7 @@ def render() -> None:
                 if invalid_num.any():
                     st.dataframe(
                         _preview(frame[invalid_num].head(max_rows), [column]),
-                        width="stretch",
+                        use_container_width=True,
                     )
                     _record_issues(label, frame, invalid_num, column, "Invalid Number")
 

@@ -284,9 +284,8 @@ def render() -> None:
             options = editable["Expense_ID"].tolist()
             selected_id = st.selectbox("Select Expense ID", options, key="expense_update_id")
             selected_row = editable.loc[editable["Expense_ID"] == selected_id].iloc[0]
-            default_date = pd.to_datetime(
+            default_date = utils.to_datetime_explicit(
                 str(selected_row.get("Date", "")).strip(),
-                errors="coerce",
                 dayfirst=True,
             )
             if pd.isna(default_date):
@@ -442,7 +441,7 @@ def render() -> None:
     ]
     edited = st.data_editor(
         display_entries,
-        width="stretch",
+        use_container_width=True,
         disabled=[column for column in display_entries.columns if column != "Delete"],
         key="expense_entries",
     )
@@ -472,11 +471,11 @@ def render() -> None:
     mask, _ = utils.build_validation_mask(entries, rules)
     if mask.any().any():
         st.caption("Rows highlighted in red need correction.")
-        st.dataframe(utils.style_invalid(entries, mask), width="stretch")
+        st.dataframe(utils.style_invalid(entries, mask), use_container_width=True)
         invalid_rows = entries[mask.any(axis=1)].copy()
         edited_invalid = st.data_editor(
             invalid_rows,
-            width="stretch",
+            use_container_width=True,
             disabled=[column for column in ["Expense_ID", "Verified"] if column in invalid_rows.columns],
             key="expense_invalid_editor",
         )
@@ -486,9 +485,8 @@ def render() -> None:
                 row_id = str(row.get("Expense_ID", "")).strip()
                 if not row_id:
                     continue
-                entry_date = pd.to_datetime(
+                entry_date = utils.to_datetime_explicit(
                     str(row.get("Date", "")).strip(),
-                    errors="coerce",
                     dayfirst=True,
                 )
                 if pd.notna(entry_date):
