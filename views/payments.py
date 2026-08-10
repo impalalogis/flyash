@@ -35,12 +35,10 @@ def _customer_options(customers: pd.DataFrame) -> dict[str, str]:
 
 
 def _format_date_value(value: object) -> str:
-    if isinstance(value, date):
-        return value.isoformat()
-    parsed = utils.to_datetime_series_explicit(str(value), dayfirst=True)
-    if pd.isna(parsed):
+    parsed = utils.parse_date_value(value, dayfirst=True)
+    if parsed is None:
         return str(value)
-    return parsed.date().isoformat()
+    return parsed.isoformat()
 
 
 def _sort_by_date(
