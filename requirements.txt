@@ -7,3 +7,4 @@ google-auth
 altair
 reportlab
 openpyxl
+psycopg2-binary
