@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from db.connection import get_connection
-from db.schema_definitions import TableDef, iter_table_definitions
+from db.schema_definitions import SYNC_METADATA_TABLE, TableDef, iter_table_definitions
 
 
 def build_create_table_sql(table: TableDef) -> str:
@@ -23,8 +23,8 @@ def build_create_table_sql(table: TableDef) -> str:
 
 
 def build_sync_metadata_sql() -> str:
-    return """
-CREATE TABLE IF NOT EXISTS sync_metadata (
+    return f"""
+CREATE TABLE IF NOT EXISTS {SYNC_METADATA_TABLE} (
     table_name VARCHAR(128) PRIMARY KEY,
     last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     row_count INTEGER NOT NULL DEFAULT 0

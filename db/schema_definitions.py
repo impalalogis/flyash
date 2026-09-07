@@ -44,9 +44,14 @@ def _col(sheet_name: str, db_name: str, pg_type: str) -> ColumnDef:
     return ColumnDef(sheet_name=sheet_name, db_name=db_name, pg_type=pg_type)
 
 
+# PostgreSQL tables use a flyash_ prefix to namespace ERP data in shared databases.
+TABLE_PREFIX = "flyash_"
+SYNC_METADATA_TABLE = f"{TABLE_PREFIX}sync_metadata"
+
+
 SALES_LOG = TableDef(
     sheet_name="Sales_Log",
-    table_name="sales_log",
+    table_name=f"{TABLE_PREFIX}sales_log",
     id_column="Sales_ID",
     primary_key=("sales_id",),
     columns=(
@@ -57,7 +62,7 @@ SALES_LOG = TableDef(
         _col("Month", "month", "VARCHAR(32)"),
         _col("Customer_ID", "customer_id", "VARCHAR(64)"),
         _col("Customer_Name", "customer_name", "VARCHAR(255)"),
-        _col("Destination", "destination", "VARCHAR(255)"),
+        _col("Destination", "destination", "TEXT"),
         _col("Product", "product", "VARCHAR(128)"),
         _col("HSN Code", "hsn_code", "VARCHAR(32)"),
         _col("Qty", "qty", "INTEGER"),
@@ -90,18 +95,18 @@ SALES_LOG = TableDef(
 
 PAYMENTS = TableDef(
     sheet_name="Payments",
-    table_name="payments",
+    table_name=f"{TABLE_PREFIX}payments",
     id_column="Payment_ID",
     primary_key=("payment_id",),
     columns=(
         _col("Payment_ID", "payment_id", "VARCHAR(64)"),
         _col("Customer_ID", "customer_id", "VARCHAR(64)"),
-        _col("Customer_Name", "customer_name", "VARCHAR(255)"),
-        _col("Invoice_No", "invoice_no", "VARCHAR(64)"),
+        _col("Customer_Name", "customer_name", "TEXT"),
+        _col("Invoice_No", "invoice_no", "VARCHAR(255)"),
         _col("Amount_Paid", "amount_paid", "NUMERIC(18, 4)"),
         _col("Date", "date", "DATE"),
-        _col("Mode", "mode", "VARCHAR(64)"),
-        _col("Payment_Status", "payment_status", "VARCHAR(64)"),
+        _col("Mode", "mode", "VARCHAR(128)"),
+        _col("Payment_Status", "payment_status", "VARCHAR(128)"),
         _col("Remaining_Amount", "remaining_amount", "NUMERIC(18, 4)"),
         _col("HSN_Code", "hsn_code", "VARCHAR(32)"),
     ),
@@ -109,7 +114,7 @@ PAYMENTS = TableDef(
 
 RAW_MATERIAL_LOG = TableDef(
     sheet_name="Raw_Material_Log",
-    table_name="raw_material_log",
+    table_name=f"{TABLE_PREFIX}raw_material_log",
     id_column="RM_ID",
     primary_key=("rm_id",),
     columns=(
@@ -137,7 +142,7 @@ RAW_MATERIAL_LOG = TableDef(
 
 CUSTOMERS = TableDef(
     sheet_name="Customers",
-    table_name="customers",
+    table_name=f"{TABLE_PREFIX}customers",
     id_column="Customer_ID",
     primary_key=("customer_id",),
     columns=(
@@ -153,7 +158,7 @@ CUSTOMERS = TableDef(
 
 SUPPLIERS = TableDef(
     sheet_name="Suppliers",
-    table_name="suppliers",
+    table_name=f"{TABLE_PREFIX}suppliers",
     id_column="Supplier_ID",
     primary_key=("supplier_id",),
     columns=(
@@ -168,7 +173,7 @@ SUPPLIERS = TableDef(
 
 PRODUCTION_LOG = TableDef(
     sheet_name="Production_Log",
-    table_name="production_log",
+    table_name=f"{TABLE_PREFIX}production_log",
     id_column="Prod_ID",
     primary_key=("prod_id",),
     columns=(
@@ -190,7 +195,7 @@ PRODUCTION_LOG = TableDef(
 
 PHYSICAL_STOCK_LOG = TableDef(
     sheet_name="Physical_Stock_Log",
-    table_name="physical_stock_log",
+    table_name=f"{TABLE_PREFIX}physical_stock_log",
     id_column=None,
     primary_key=("date", "material"),
     columns=(
@@ -203,7 +208,7 @@ PHYSICAL_STOCK_LOG = TableDef(
 
 STOCK_LOG = TableDef(
     sheet_name="Stock_Log",
-    table_name="stock_log",
+    table_name=f"{TABLE_PREFIX}stock_log",
     id_column=None,
     primary_key=("date", "material"),
     columns=(
@@ -219,7 +224,7 @@ STOCK_LOG = TableDef(
 
 LABOUR_ATTENDANCE = TableDef(
     sheet_name="Labour_Attendance",
-    table_name="labour_attendance",
+    table_name=f"{TABLE_PREFIX}labour_attendance",
     id_column="Attendance_ID",
     primary_key=("attendance_id",),
     columns=(
@@ -233,7 +238,7 @@ LABOUR_ATTENDANCE = TableDef(
 
 LABOUR = TableDef(
     sheet_name="Labour",
-    table_name="labour",
+    table_name=f"{TABLE_PREFIX}labour",
     id_column="Labour_ID",
     primary_key=("labour_id",),
     columns=(
@@ -247,7 +252,7 @@ LABOUR = TableDef(
 
 WORK_WEEK = TableDef(
     sheet_name="Work_Week",
-    table_name="work_week",
+    table_name=f"{TABLE_PREFIX}work_week",
     id_column=None,
     primary_key=("week_start",),
     columns=(
