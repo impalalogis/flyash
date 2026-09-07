@@ -1,13 +1,10 @@
--- PostgreSQL schema mirroring Google Sheets tabs for the fly-ash ERP workflow.
--- Generated from db/schema_definitions.py. Safe to re-run (IF NOT EXISTS).
-
-CREATE TABLE IF NOT EXISTS sync_metadata (
+CREATE TABLE IF NOT EXISTS flyash_sync_metadata (
     table_name VARCHAR(128) PRIMARY KEY,
     last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     row_count INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS suppliers (
+CREATE TABLE IF NOT EXISTS flyash_suppliers (
     supplier_id VARCHAR(64),
     name VARCHAR(255),
     material_type VARCHAR(128),
@@ -17,7 +14,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     PRIMARY KEY (supplier_id)
 );
 
-CREATE TABLE IF NOT EXISTS customers (
+CREATE TABLE IF NOT EXISTS flyash_customers (
     customer_id VARCHAR(64),
     name VARCHAR(255),
     gst VARCHAR(32),
@@ -28,7 +25,7 @@ CREATE TABLE IF NOT EXISTS customers (
     PRIMARY KEY (customer_id)
 );
 
-CREATE TABLE IF NOT EXISTS labour (
+CREATE TABLE IF NOT EXISTS flyash_labour (
     labour_id VARCHAR(64),
     name VARCHAR(255),
     category VARCHAR(64),
@@ -37,7 +34,7 @@ CREATE TABLE IF NOT EXISTS labour (
     PRIMARY KEY (labour_id)
 );
 
-CREATE TABLE IF NOT EXISTS raw_material_log (
+CREATE TABLE IF NOT EXISTS flyash_raw_material_log (
     rm_id VARCHAR(64),
     date DATE,
     year INTEGER,
@@ -60,7 +57,7 @@ CREATE TABLE IF NOT EXISTS raw_material_log (
     PRIMARY KEY (rm_id)
 );
 
-CREATE TABLE IF NOT EXISTS production_log (
+CREATE TABLE IF NOT EXISTS flyash_production_log (
     prod_id VARCHAR(64),
     date DATE,
     month VARCHAR(32),
@@ -77,7 +74,7 @@ CREATE TABLE IF NOT EXISTS production_log (
     PRIMARY KEY (prod_id)
 );
 
-CREATE TABLE IF NOT EXISTS physical_stock_log (
+CREATE TABLE IF NOT EXISTS flyash_physical_stock_log (
     date DATE,
     material VARCHAR(128),
     physical_stock_tons NUMERIC(18, 4),
@@ -85,7 +82,7 @@ CREATE TABLE IF NOT EXISTS physical_stock_log (
     PRIMARY KEY (date, material)
 );
 
-CREATE TABLE IF NOT EXISTS stock_log (
+CREATE TABLE IF NOT EXISTS flyash_stock_log (
     date DATE,
     month VARCHAR(32),
     material VARCHAR(128),
@@ -96,7 +93,7 @@ CREATE TABLE IF NOT EXISTS stock_log (
     PRIMARY KEY (date, material)
 );
 
-CREATE TABLE IF NOT EXISTS labour_attendance (
+CREATE TABLE IF NOT EXISTS flyash_labour_attendance (
     attendance_id VARCHAR(64),
     date DATE,
     labour_id VARCHAR(64),
@@ -105,7 +102,7 @@ CREATE TABLE IF NOT EXISTS labour_attendance (
     PRIMARY KEY (attendance_id)
 );
 
-CREATE TABLE IF NOT EXISTS sales_log (
+CREATE TABLE IF NOT EXISTS flyash_sales_log (
     sales_id VARCHAR(64),
     date DATE,
     fiscal VARCHAR(32),
@@ -113,7 +110,7 @@ CREATE TABLE IF NOT EXISTS sales_log (
     month VARCHAR(32),
     customer_id VARCHAR(64),
     customer_name VARCHAR(255),
-    destination VARCHAR(255),
+    destination TEXT,
     product VARCHAR(128),
     hsn_code VARCHAR(32),
     qty INTEGER,
@@ -144,21 +141,21 @@ CREATE TABLE IF NOT EXISTS sales_log (
     PRIMARY KEY (sales_id)
 );
 
-CREATE TABLE IF NOT EXISTS payments (
+CREATE TABLE IF NOT EXISTS flyash_payments (
     payment_id VARCHAR(64),
     customer_id VARCHAR(64),
-    customer_name VARCHAR(255),
-    invoice_no VARCHAR(64),
+    customer_name TEXT,
+    invoice_no VARCHAR(255),
     amount_paid NUMERIC(18, 4),
     date DATE,
-    mode VARCHAR(64),
-    payment_status VARCHAR(64),
+    mode VARCHAR(128),
+    payment_status VARCHAR(128),
     remaining_amount NUMERIC(18, 4),
     hsn_code VARCHAR(32),
     PRIMARY KEY (payment_id)
 );
 
-CREATE TABLE IF NOT EXISTS work_week (
+CREATE TABLE IF NOT EXISTS flyash_work_week (
     week_start DATE,
     week_end DATE,
     total_days INTEGER,

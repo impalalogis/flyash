@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 
 from db.connection import get_connection
-from db.schema_definitions import TableDef, get_table_definition
+from db.schema_definitions import SYNC_METADATA_TABLE, TableDef, get_table_definition
 
 
 INTEGER_TYPES = {"INTEGER"}
@@ -163,8 +163,8 @@ def replace_table(table_name: str, data_frame: pd.DataFrame) -> None:
 
 
 def update_sync_metadata(table_name: str, row_count: int) -> None:
-    query = """
-        INSERT INTO sync_metadata (table_name, last_synced_at, row_count)
+    query = f"""
+        INSERT INTO {SYNC_METADATA_TABLE} (table_name, last_synced_at, row_count)
         VALUES (%s, NOW(), %s)
         ON CONFLICT (table_name)
         DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at,
