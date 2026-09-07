@@ -51,14 +51,35 @@ def get_db_config() -> dict[str, Any]:
             secrets.get("sync_to_sheets", os.getenv("SYNC_TO_SHEETS")),
             default=False,
         ),
-        "host": str(secrets.get("host", os.getenv("POSTGRES_HOST", "localhost"))),
-        "port": int(secrets.get("port", os.getenv("POSTGRES_PORT", "5432"))),
-        "database": str(
-            secrets.get("database", os.getenv("POSTGRES_DB", "flyash_erp"))
+        "host": str(
+            secrets.get(
+                "host",
+                os.getenv("POSTGRES_HOST", os.getenv("DB_HOST", "localhost")),
+            )
         ),
-        "user": str(secrets.get("user", os.getenv("POSTGRES_USER", "postgres"))),
+        "port": int(
+            secrets.get(
+                "port",
+                os.getenv("POSTGRES_PORT", os.getenv("DB_PORT", "5432")),
+            )
+        ),
+        "database": str(
+            secrets.get(
+                "database",
+                os.getenv("POSTGRES_DB", os.getenv("DB_NAME", "flyash_erp")),
+            )
+        ),
+        "user": str(
+            secrets.get(
+                "user",
+                os.getenv("POSTGRES_USER", os.getenv("DB_USER", "postgres")),
+            )
+        ),
         "password": str(
-            secrets.get("password", os.getenv("POSTGRES_PASSWORD", ""))
+            secrets.get(
+                "password",
+                os.getenv("POSTGRES_PASSWORD", os.getenv("DB_PASSWORD", "")),
+            )
         ),
         "url": str(
             secrets.get(
@@ -96,3 +117,17 @@ def get_connection_dsn() -> str:
     return (
         f"postgresql://{auth}@{config['host']}:{config['port']}/{config['database']}"
     )
+
+
+def get_connection_kwargs() -> dict[str, object]:
+    """Return psycopg2 keyword arguments (avoids URL-encoding issues in passwords)."""
+    config = get_db_config()
+    if config["url"]:
+        return {"dsn": config["url"]}
+    return {
+        "host": config["host"],
+        "port": config["port"],
+        "dbname": config["database"],
+        "user": config["user"],
+        "password": config["password"],
+    }

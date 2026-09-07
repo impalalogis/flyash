@@ -25,8 +25,25 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _load_dotenv_into_env() -> None:
+    """Load DB_* variables from a local .env file when present."""
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in __import__("os").environ:
+            __import__("os").environ[key] = value
+
+
 def _load_secrets_into_env() -> None:
     """Load database settings from Streamlit secrets when running standalone."""
+    _load_dotenv_into_env()
     secrets_path = ROOT / ".streamlit" / "secrets.toml"
     if not secrets_path.exists():
         return
@@ -36,8 +53,16 @@ def _load_secrets_into_env() -> None:
         import tomli as tomllib  # type: ignore[no-redef]
     secrets = tomllib.loads(secrets_path.read_text(encoding="utf-8"))
     database = secrets.get("database", {})
+    env_map = {
+        "host": "DB_HOST",
+        "port": "DB_PORT",
+        "database": "DB_NAME",
+        "user": "DB_USER",
+        "password": "DB_PASSWORD",
+        "url": "DATABASE_URL",
+    }
     for key, value in database.items():
-        env_key = key.upper() if key != "url" else "DATABASE_URL"
+        env_key = env_map.get(key, key.upper())
         if env_key not in __import__("os").environ and value not in ("", None):
             __import__("os").environ[env_key] = str(value)
 
