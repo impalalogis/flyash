@@ -8,13 +8,13 @@ from typing import Generator
 import psycopg2
 from psycopg2.extensions import connection as PgConnection
 
-from db.config import get_connection_dsn
+from db.config import get_connection_kwargs
 
 
 @contextmanager
 def get_connection() -> Generator[PgConnection, None, None]:
     """Open a PostgreSQL connection and always close it."""
-    conn = psycopg2.connect(get_connection_dsn())
+    conn = psycopg2.connect(**get_connection_kwargs())
     try:
         yield conn
         conn.commit()
