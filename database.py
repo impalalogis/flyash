@@ -31,6 +31,76 @@ READ_CACHE_TTL = 120
 MANUAL_SALES_LOG_COLUMNS = {"old_Invoice_No", "Invoice_No"}
 
 
+def _use_postgres_primary() -> bool:
+    """Return True when USE_DB=true and PostgreSQL is the primary backend."""
+    try:
+        from db.config import is_db_enabled
+
+        return is_db_enabled()
+    except Exception:
+        return False
+
+
+def _mirror_sheets_write_to_postgres(
+    table_name: str,
+    operation: str,
+    *,
+    data: Dict[str, Any] | None = None,
+    row_id: str | None = None,
+    data_frame: pd.DataFrame | None = None,
+) -> None:
+    try:
+        from db.sync import after_sheets_write
+
+        after_sheets_write(
+            table_name,
+            operation,
+            data=data,
+            row_id=row_id,
+            data_frame=data_frame,
+        )
+    except Exception as exc:
+        app_logging.log_event(
+            logger,
+            "postgres_mirror_skipped",
+            table=table_name,
+            operation=operation,
+            error=str(exc),
+        )
+
+
+def _mirror_postgres_write_to_sheets(
+    table_name: str,
+    operation: str,
+    *,
+    data: Dict[str, Any] | None = None,
+    row_id: str | None = None,
+    data_frame: pd.DataFrame | None = None,
+) -> None:
+    try:
+        from db.sync import after_postgres_write
+
+        after_postgres_write(
+            table_name,
+            operation,
+            data=data,
+            row_id=row_id,
+            data_frame=data_frame,
+            sheets_inserter=_insert_row_gsheets,
+            sheets_updater=_update_row_gsheets,
+            sheets_deleter=_delete_row_gsheets,
+            sheets_replacer=_replace_table_gsheets,
+        )
+    except Exception as exc:
+        app_logging.log_event(
+            logger,
+            "sheets_mirror_skipped",
+            table=table_name,
+            operation=operation,
+            error=str(exc),
+        )
+
+
 def _should_recompute_stock(table_name: str) -> bool:
     return table_name in {"Raw_Material_Log", "Production_Log"}
 
@@ -201,6 +271,20 @@ def _read_table_cached(table_name: str, spreadsheet_id: str) -> pd.DataFrame:
 
 
 def read_table(table_name: str) -> pd.DataFrame:
+    if _use_postgres_primary():
+        try:
+            from db.repository import read_table as read_table_postgres
+
+            app_logging.log_event(logger, "read_table_postgres", table=table_name)
+            return read_table_postgres(table_name)
+        except Exception as exc:
+            app_logging.log_event(
+                logger,
+                "read_table_postgres_failed",
+                table=table_name,
+                error=str(exc),
+            )
+            raise
     spreadsheet_id = _get_spreadsheet_id()
     app_logging.log_event(logger, "read_table", table=table_name)
     return _read_table_cached(table_name, spreadsheet_id).copy()
@@ -238,12 +322,22 @@ def clear_read_cache() -> None:
 
 def update_stock_log() -> None:
     clear_read_cache()
-    spreadsheet_id = _get_spreadsheet_id()
-    stock_df = compute_stock_log_cached(spreadsheet_id)
+    if _use_postgres_primary():
+        raw_df = read_table("Raw_Material_Log")
+        production_df = read_table("Production_Log")
+        stock_df = utils.compute_stock_log(raw_df, production_df)
+    else:
+        spreadsheet_id = _get_spreadsheet_id()
+        stock_df = compute_stock_log_cached(spreadsheet_id)
     replace_table("Stock_Log", stock_df, recompute_stock=False)
 
 
-def insert_row(table_name: str, data: Dict[str, Any], *, recompute_stock: bool = True) -> None:
+def _insert_row_gsheets(
+    table_name: str,
+    data: Dict[str, Any],
+    *,
+    recompute_stock: bool = True,
+) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
     data = _without_manual_sales_log_columns(table_name, data)
@@ -252,6 +346,27 @@ def insert_row(table_name: str, data: Dict[str, Any], *, recompute_stock: bool =
     clear_read_cache()
     if recompute_stock and _should_recompute_stock(table_name):
         update_stock_log()
+
+
+def insert_row(table_name: str, data: Dict[str, Any], *, recompute_stock: bool = True) -> None:
+    if _use_postgres_primary():
+        from db.repository import upsert_row
+        from db.schema import ensure_schema
+
+        payload = _without_manual_sales_log_columns(table_name, data)
+        ensure_schema([table_name])
+        upsert_row(table_name, payload)
+        _mirror_postgres_write_to_sheets(
+            table_name,
+            "insert",
+            data=payload,
+        )
+        if recompute_stock and _should_recompute_stock(table_name):
+            update_stock_log()
+        return
+
+    _insert_row_gsheets(table_name, data, recompute_stock=recompute_stock)
+    _mirror_sheets_write_to_postgres(table_name, "insert", data=data)
 
 
 def _find_row_cell(
@@ -270,7 +385,7 @@ def _find_row_cell(
         raise ValueError(f"Row ID {row_id} not found in {table_name}") from exc
 
 
-def update_row(
+def _update_row_gsheets(
     table_name: str,
     row_id: str,
     data: Dict[str, Any],
@@ -301,7 +416,53 @@ def update_row(
         update_stock_log()
 
 
-def delete_row(table_name: str, row_id: str, *, recompute_stock: bool = True) -> None:
+def update_row(
+    table_name: str,
+    row_id: str,
+    data: Dict[str, Any],
+    *,
+    recompute_stock: bool = True,
+) -> None:
+    if _use_postgres_primary():
+        from db.repository import upsert_row
+        from db.schema import ensure_schema
+
+        payload = _without_manual_sales_log_columns(table_name, data)
+        id_column = ID_COLUMNS.get(table_name)
+        if id_column:
+            payload[id_column] = row_id
+        ensure_schema([table_name])
+        upsert_row(table_name, payload)
+        _mirror_postgres_write_to_sheets(
+            table_name,
+            "update",
+            data=payload,
+            row_id=row_id,
+        )
+        if recompute_stock and _should_recompute_stock(table_name):
+            update_stock_log()
+        return
+
+    _update_row_gsheets(
+        table_name,
+        row_id,
+        data,
+        recompute_stock=recompute_stock,
+    )
+    _mirror_sheets_write_to_postgres(
+        table_name,
+        "update",
+        data=data,
+        row_id=row_id,
+    )
+
+
+def _delete_row_gsheets(
+    table_name: str,
+    row_id: str,
+    *,
+    recompute_stock: bool = True,
+) -> None:
     worksheet = _get_worksheet(table_name)
     header = _get_header(worksheet)
     cell = _find_row_cell(worksheet, row_id, header, table_name)
@@ -311,7 +472,27 @@ def delete_row(table_name: str, row_id: str, *, recompute_stock: bool = True) ->
         update_stock_log()
 
 
-def replace_table(
+def delete_row(table_name: str, row_id: str, *, recompute_stock: bool = True) -> None:
+    if _use_postgres_primary():
+        from db.repository import delete_row as delete_row_postgres
+        from db.schema import ensure_schema
+
+        ensure_schema([table_name])
+        delete_row_postgres(table_name, row_id)
+        _mirror_postgres_write_to_sheets(
+            table_name,
+            "delete",
+            row_id=row_id,
+        )
+        if recompute_stock and _should_recompute_stock(table_name):
+            update_stock_log()
+        return
+
+    _delete_row_gsheets(table_name, row_id, recompute_stock=recompute_stock)
+    _mirror_sheets_write_to_postgres(table_name, "delete", row_id=row_id)
+
+
+def _replace_table_gsheets(
     table_name: str,
     data_frame: pd.DataFrame,
     *,
@@ -329,6 +510,39 @@ def replace_table(
     clear_read_cache()
     if recompute_stock and _should_recompute_stock(table_name):
         update_stock_log()
+
+
+def replace_table(
+    table_name: str,
+    data_frame: pd.DataFrame,
+    *,
+    recompute_stock: bool = True,
+) -> None:
+    if _use_postgres_primary():
+        from db.repository import replace_table as replace_table_postgres
+        from db.schema import ensure_schema
+
+        ensure_schema([table_name])
+        replace_table_postgres(table_name, data_frame)
+        _mirror_postgres_write_to_sheets(
+            table_name,
+            "replace",
+            data_frame=data_frame,
+        )
+        if recompute_stock and _should_recompute_stock(table_name):
+            update_stock_log()
+        return
+
+    _replace_table_gsheets(
+        table_name,
+        data_frame,
+        recompute_stock=recompute_stock,
+    )
+    _mirror_sheets_write_to_postgres(
+        table_name,
+        "replace",
+        data_frame=data_frame,
+    )
 
 
 def generate_id(prefix: str) -> str:
