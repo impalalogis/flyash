@@ -604,6 +604,323 @@ def _build_customer_ledger_cached(customer_id: str) -> pd.DataFrame:
     )
 
 
+FY_START_MONTH = 4
+FISCAL_LEDGER_COLUMNS = [
+    "Date",
+    "Voucher Type",
+    "Voucher No.",
+    "Particulars",
+    "Debit",
+    "Credit",
+    "Balance (Dr/Cr)",
+]
+
+
+def _fy_start_year(value: date) -> int:
+    return value.year if value.month >= FY_START_MONTH else value.year - 1
+
+
+def _fy_full_label(start_year: int) -> str:
+    return f"FY {start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _fy_period_bounds(start_year: int) -> tuple[date, date]:
+    return date(start_year, FY_START_MONTH, 1), date(start_year + 1, FY_START_MONTH - 1, 31)
+
+
+def _format_ledger_date(value: object) -> str:
+    parsed = utils.to_datetime_explicit(value, dayfirst=True)
+    if pd.isna(parsed):
+        return str(value or "").strip()
+    return parsed.strftime(utils.DATE_FORMAT_DMONY)
+
+
+def _expand_sale_fiscal_lines(row: pd.Series, *, invoice_ref: str, date_display: str) -> list[dict[str, object]]:
+    product = str(row.get("Product", "fly-ash bricks")).strip() or "fly-ash bricks"
+    hsn_code = str(row.get("HSN Code", "")).strip() or "6815"
+    qty = utils.safe_float(row.get("Qty", 0.0))
+    rate = utils.safe_float(row.get("Adjusted_Rate", row.get("Rate", 0.0)))
+    if rate <= 0 and qty > 0:
+        rate = utils.safe_float(row.get("Rate", 0.0))
+    amount = utils.safe_float(row.get("Amount", 0.0))
+    freight = utils.safe_float(row.get("Freight", 0.0))
+    gst = utils.safe_float(
+        row.get("GST(%12)", row.get("Gst (%12)", row.get("GST", 0.0)))
+    )
+    lines: list[dict[str, object]] = [
+        {
+            "Date": date_display,
+            "Voucher Type": "Sales Invoice",
+            "Voucher No.": invoice_ref,
+            "Particulars": f"{product} (HSN {hsn_code}) | Qty {qty:,.0f} | Rate {rate:,.2f}",
+            "Debit": amount,
+            "Credit": 0.0,
+        }
+    ]
+    if freight > 0.005:
+        lines.append(
+            {
+                "Date": "",
+                "Voucher Type": "",
+                "Voucher No.": "",
+                "Particulars": "Freight",
+                "Debit": freight,
+                "Credit": 0.0,
+            }
+        )
+    if gst > 0.005:
+        lines.append(
+            {
+                "Date": "",
+                "Voucher Type": "",
+                "Voucher No.": "",
+                "Particulars": f"GST @ {GST_RATE:.0f}%",
+                "Debit": gst,
+                "Credit": 0.0,
+            }
+        )
+    return lines
+
+
+def _expand_payment_fiscal_lines(
+    row: pd.Series,
+    *,
+    date_display: str,
+    invoice_map: dict[str, str],
+) -> list[dict[str, object]]:
+    payment_id = str(row.get("Payment_ID", "")).strip()
+    mode = str(row.get("Mode", "")).strip()
+    applied = _payment_applied_amount(row)
+    raw_invoice_ref = str(row.get("Invoice_No", "")).strip()
+    if raw_invoice_ref:
+        invoice_parts = [part.strip() for part in raw_invoice_ref.split(",") if part.strip()]
+        invoice_refs = [invoice_map.get(part, part) for part in invoice_parts]
+    else:
+        invoice_refs = []
+    particulars = "Payment received"
+    if mode:
+        particulars = f"Payment received ({mode})"
+    lines: list[dict[str, object]] = [
+        {
+            "Date": date_display,
+            "Voucher Type": "Receipt",
+            "Voucher No.": payment_id,
+            "Particulars": particulars,
+            "Debit": 0.0,
+            "Credit": applied,
+        }
+    ]
+    for invoice_ref in invoice_refs:
+        lines.append(
+            {
+                "Date": "",
+                "Voucher Type": "",
+                "Voucher No.": invoice_ref,
+                "Particulars": "Against invoice",
+                "Debit": 0.0,
+                "Credit": 0.0,
+            }
+        )
+    return lines
+
+
+def _build_fiscal_year_ledger_sections(
+    sales_df: pd.DataFrame,
+    payments_df: pd.DataFrame,
+    customer_id: str,
+) -> list[dict[str, object]]:
+    sales_df = utils.ensure_columns(
+        sales_df,
+        [
+            "Sales_ID",
+            "Date",
+            "Month",
+            "Customer_ID",
+            "Product",
+            "HSN Code",
+            "Qty",
+            "Rate",
+            "Adjusted_Rate",
+            "Amount",
+            "Freight",
+            "GST(%12)",
+            "Total_Amount",
+            "Adjusted_Total_amount",
+            "old_Invoice_No",
+            "Invoice_No",
+        ],
+    ).copy()
+    payments_df = utils.ensure_columns(
+        payments_df,
+        [
+            "Payment_ID",
+            "Customer_ID",
+            "Invoice_No",
+            "Amount_Paid",
+            "Date",
+            "Mode",
+            "Payment_Status",
+            "Remaining_Amount",
+        ],
+    ).copy()
+
+    sales_df = sales_df[sales_df["Customer_ID"].astype(str).str.strip() == customer_id]
+    payments_df = payments_df[payments_df["Customer_ID"].astype(str).str.strip() == customer_id]
+    if sales_df.empty and payments_df.empty:
+        return []
+
+    invoice_map: dict[str, str] = {}
+    for _, sale_row in sales_df.iterrows():
+        original = str(sale_row.get("old_Invoice_No", "")).strip()
+        updated = str(sale_row.get("Invoice_No", "")).strip()
+        canonical = updated or original
+        if not canonical:
+            continue
+        if original:
+            invoice_map[original] = canonical
+        invoice_map[canonical] = canonical
+
+    sales_dates = utils.parse_date_series(
+        sales_df.get("Date", pd.Series(dtype=str)),
+        dayfirst=True,
+        month_hint=sales_df["Month"] if "Month" in sales_df.columns else None,
+    )
+    payment_dates = utils.parse_date_series(
+        payments_df.get("Date", pd.Series(dtype=str)),
+        dayfirst=True,
+    )
+    sales_date_display = sales_df.get("Date", pd.Series(dtype=str)).astype(str).replace("NaT", "")
+    payment_date_display = payments_df.get("Date", pd.Series(dtype=str)).astype(str).replace("NaT", "")
+
+    transactions: list[dict[str, object]] = []
+    for idx, row in sales_df.iterrows():
+        txn_date = sales_dates.loc[idx]
+        if pd.isna(txn_date):
+            continue
+        txn_date_value = txn_date.date()
+        invoice_ref = str(row.get("Invoice_No", "")).strip() or str(
+            row.get("old_Invoice_No", "")
+        ).strip() or str(row.get("Sales_ID", "")).strip()
+        transactions.append(
+            {
+                "date": txn_date_value,
+                "fy": _fy_start_year(txn_date_value),
+                "sort_order": 0,
+                "reference": invoice_ref,
+                "lines": _expand_sale_fiscal_lines(
+                    row,
+                    invoice_ref=invoice_ref,
+                    date_display=str(sales_date_display.loc[idx]).strip()
+                    or _format_ledger_date(txn_date_value),
+                ),
+            }
+        )
+
+    for idx, row in payments_df.iterrows():
+        txn_date = payment_dates.loc[idx]
+        if pd.isna(txn_date):
+            continue
+        txn_date_value = txn_date.date()
+        payment_id = str(row.get("Payment_ID", "")).strip()
+        transactions.append(
+            {
+                "date": txn_date_value,
+                "fy": _fy_start_year(txn_date_value),
+                "sort_order": 1,
+                "reference": payment_id,
+                "lines": _expand_payment_fiscal_lines(
+                    row,
+                    date_display=str(payment_date_display.loc[idx]).strip()
+                    or _format_ledger_date(txn_date_value),
+                    invoice_map=invoice_map,
+                ),
+            }
+        )
+
+    if not transactions:
+        return []
+
+    transactions.sort(key=lambda item: (item["date"], item["sort_order"], str(item["reference"])))
+    fy_years = sorted({int(item["fy"]) for item in transactions})
+    running_balance = 0.0
+    fy_opening: dict[int, float] = {}
+    fy_rows: dict[int, list[dict[str, object]]] = {year: [] for year in fy_years}
+    fy_totals: dict[int, dict[str, float]] = {
+        year: {"total_debit": 0.0, "total_credit": 0.0} for year in fy_years
+    }
+
+    current_fy: int | None = None
+    for txn in transactions:
+        txn_fy = int(txn["fy"])
+        if current_fy is None or txn_fy != current_fy:
+            if txn_fy not in fy_opening:
+                fy_opening[txn_fy] = running_balance
+                period_start, _ = _fy_period_bounds(txn_fy)
+                opening = running_balance
+                opening_row = {
+                    "Date": _format_ledger_date(period_start),
+                    "Voucher Type": "Opening Balance",
+                    "Voucher No.": "",
+                    "Particulars": (
+                        f"B/F from {_fy_full_label(txn_fy - 1)}"
+                        if txn_fy > fy_years[0]
+                        else "Balance B/F"
+                    ),
+                    "Debit": opening if opening > 0.005 else 0.0,
+                    "Credit": abs(opening) if opening < -0.005 else 0.0,
+                    "Balance (Dr/Cr)": utils.format_ledger_balance_dr_cr(opening),
+                }
+                fy_rows[txn_fy].append(opening_row)
+            current_fy = txn_fy
+
+        for line in txn["lines"]:
+            debit = utils.safe_float(line.get("Debit", 0.0))
+            credit = utils.safe_float(line.get("Credit", 0.0))
+            running_balance += debit - credit
+            display_line = dict(line)
+            display_line["Balance (Dr/Cr)"] = utils.format_ledger_balance_dr_cr(running_balance)
+            fy_rows[txn_fy].append(display_line)
+            if debit > 0.005:
+                fy_totals[txn_fy]["total_debit"] += debit
+            if credit > 0.005:
+                fy_totals[txn_fy]["total_credit"] += credit
+
+    sections: list[dict[str, object]] = []
+    for fy in fy_years:
+        opening = fy_opening.get(fy, 0.0)
+        totals = fy_totals[fy]
+        closing = opening + totals["total_debit"] - totals["total_credit"]
+        period_start, period_end = _fy_period_bounds(fy)
+        sections.append(
+            {
+                "fy_label": _fy_full_label(fy),
+                "period_label": (
+                    f"{_format_ledger_date(period_start)} to {_format_ledger_date(period_end)}"
+                ),
+                "rows": fy_rows.get(fy, []),
+                "summary": {
+                    "opening": opening,
+                    "opening_display": utils.format_ledger_balance_dr_cr(opening),
+                    "total_debit": totals["total_debit"],
+                    "total_credit": totals["total_credit"],
+                    "closing": closing,
+                    "closing_display": utils.format_ledger_balance_dr_cr(closing),
+                },
+            }
+        )
+    return sections
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _build_fiscal_year_ledger_sections_cached(customer_id: str) -> list[dict[str, object]]:
+    tables = database.read_tables(["Sales_Log", "Payments"])
+    return _build_fiscal_year_ledger_sections(
+        tables["Sales_Log"],
+        tables["Payments"],
+        customer_id,
+    )
+
+
 def _ledger_events(
     sales_df: pd.DataFrame,
     payments_df: pd.DataFrame,
@@ -1524,6 +1841,89 @@ def render() -> None:
                     file_name=f"ledger_{file_label}.pdf",
                     mime="application/pdf",
                 )
+
+    st.subheader("Fiscal Year Ledger")
+    if not has_entries:
+        st.info("No sales records available for fiscal year ledger.")
+    else:
+        fy_ledger_customer_label = st.selectbox(
+            "Customer",
+            list(customer_labels.keys()),
+            key="fy_ledger_customer",
+        )
+        fy_ledger_customer_id = customer_labels[fy_ledger_customer_label]
+        fy_customer_row = customers.loc[customers["Customer_ID"] == fy_ledger_customer_id]
+        fy_customer_row = (
+            fy_customer_row.iloc[0] if not fy_customer_row.empty else pd.Series(dtype=object)
+        )
+
+        fy_sections = _build_fiscal_year_ledger_sections_cached(fy_ledger_customer_id)
+        if not fy_sections:
+            st.info("No fiscal year ledger entries for the selected customer.")
+        else:
+            company_info, branding = _resolve_invoice_settings(
+                company_defaults, branding_defaults, payment_defaults
+            )
+            payment_details = branding.get("payment_details") or {}
+            firm_details = {
+                "name": company_info.get("name", ""),
+                "gstin": company_info.get("gst", ""),
+                "pan": str(payment_details.get("pan", "BJQPS7761G")).strip() or "BJQPS7761G",
+                "account_no": str(payment_details.get("account_no", "7392892219")).strip()
+                or "7392892219",
+                "ifsc": str(payment_details.get("ifsc", "IDIB000B171")).strip() or "IDIB000B171",
+            }
+            customer_details = {
+                "name": str(fy_customer_row.get("Name", "")).strip(),
+                "gstin": str(fy_customer_row.get("GST", "")).strip(),
+                "address": str(fy_customer_row.get("Address", "")).strip(),
+            }
+            export_sections = []
+            preview_frames: list[pd.DataFrame] = []
+            for section in fy_sections:
+                section_payload = dict(section)
+                section_payload["firm"] = firm_details
+                section_payload["customer"] = customer_details
+                export_sections.append(section_payload)
+                section_df = pd.DataFrame(section.get("rows") or [], columns=FISCAL_LEDGER_COLUMNS)
+                if not section_df.empty:
+                    section_df.insert(0, "Fiscal Year", section.get("fy_label", ""))
+                    preview_frames.append(section_df)
+
+            if preview_frames:
+                st.dataframe(pd.concat(preview_frames, ignore_index=True), use_container_width=True)
+
+            for section in fy_sections:
+                summary = section.get("summary") or {}
+                st.caption(
+                    f"{section.get('fy_label', '')} ({section.get('period_label', '')}) — "
+                    f"Opening {summary.get('opening_display', '')}, "
+                    f"Closing {summary.get('closing_display', '')}"
+                )
+
+            file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", fy_ledger_customer_label)
+            excel_bytes = utils.generate_fiscal_year_ledger_excel(
+                export_sections,
+                title="Fiscal Year Ledger",
+            )
+            st.download_button(
+                "Download Fiscal Year Ledger (Excel)",
+                data=excel_bytes,
+                file_name=f"fiscal_year_ledger_{file_label}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_fy_ledger_excel",
+            )
+            pdf_bytes = utils.generate_fiscal_year_ledger_pdf(
+                export_sections,
+                title="Fiscal Year Ledger",
+            )
+            st.download_button(
+                "Download Fiscal Year Ledger (PDF)",
+                data=pdf_bytes,
+                file_name=f"fiscal_year_ledger_{file_label}.pdf",
+                mime="application/pdf",
+                key="download_fy_ledger_pdf",
+            )
 
     if SHOW_VALIDATION and has_entries:
         st.subheader("Validation")
