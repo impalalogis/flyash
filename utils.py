@@ -1102,7 +1102,9 @@ def generate_customer_ledger_pdf(
             "Description": str(row.get("Description", "")).strip(),
             "Debit": f"{safe_float(row.get('Debit', 0)):,.2f}",
             "Credit": f"{safe_float(row.get('Credit', 0)):,.2f}",
-            "Balance": f"{safe_float(row.get('Running_Balance', row.get('Running Balance', 0))):,.2f}",
+            "Balance": format_ledger_balance_dr_cr(
+                safe_float(row.get("Running_Balance", row.get("Running Balance", 0)))
+            ),
         }
 
         wrapped = {}
@@ -1188,8 +1190,8 @@ def format_ledger_balance_dr_cr(balance: float) -> str:
     if magnitude < 0.005:
         return "0.00 Dr"
     if rounded > 0:
-        return f"{magnitude:,.2f} Dr"
-    return f"{magnitude:,.2f} Cr"
+        return f"+{magnitude:,.2f} Dr"
+    return f"-{magnitude:,.2f} Cr"
 
 
 def _ledger_cell_amount(value: object) -> float | None:
