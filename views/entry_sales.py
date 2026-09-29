@@ -649,14 +649,10 @@ def _expand_sale_fiscal_lines(row: pd.Series, *, invoice_ref: str, date_display:
     )
     stored_value = utils.safe_float(stored_total, 0.0)
     exact_total = utils.round_down_2(amount + freight + gst)
-    if stored_value > 0.005:
-        total_amount_label = f"{int(utils.round_down_0(stored_value)):,}"
-    else:
-        total_amount_label = f"{int(utils.round_up_0(exact_total)):,}"
+    total_amount_line = invoice_total_line.replace("Invoice Total —", "Total Amount:", 1)
     detail_lines = [
         f"Invoice No: {invoice_ref}",
-        f"Total Amount: {total_amount_label}",
-        invoice_total_line,
+        total_amount_line,
     ]
     if stored_value > 0.005:
         debit = float(utils.round_down_0(stored_value))
