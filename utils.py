@@ -1198,13 +1198,67 @@ def _ledger_cell_amount(value: object) -> float | None:
     return round(amount, 2)
 
 
+CUSTOMER_ADDRESS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("Flat No.", "Flat No."),
+    ("Flat_No", "Flat No."),
+    ("Building", "Building"),
+    ("Road", "Road"),
+    ("Landmark", "Landmark"),
+    ("City", "City"),
+    ("District", "District"),
+    ("State", "State"),
+    ("PIN", "PIN"),
+    ("Pincode", "PIN"),
+    ("Pin", "PIN"),
+)
+
+
+def format_customer_address_lines(row: object) -> list[str]:
+    if row is None:
+        return []
+    if isinstance(row, dict):
+        getter = row.get
+    else:
+        getter = row.get  # pd.Series
+
+    lines: list[str] = []
+    seen_labels: set[str] = set()
+    for column, label in CUSTOMER_ADDRESS_FIELDS:
+        value = str(getter(column, "") or "").strip()
+        if not value or label in seen_labels:
+            continue
+        seen_labels.add(label)
+        lines.append(f"{label}: {value}")
+
+    fallback_address = str(getter("Address", "") or "").strip()
+    if fallback_address:
+        if lines:
+            remainder = fallback_address
+            for line in lines:
+                _, _, value = line.partition(": ")
+                if value and value in remainder:
+                    remainder = remainder.replace(value, "").strip(" ,")
+            if remainder:
+                wrapped = textwrap.wrap(remainder, width=48)
+                lines.extend(wrapped if wrapped else [remainder])
+        else:
+            wrapped = textwrap.wrap(fallback_address, width=48)
+            lines.extend(wrapped if wrapped else [fallback_address])
+
+    city = str(getter("City", "") or "").strip()
+    if city and not any(line.endswith(city) or f"City: {city}" in line for line in lines):
+        lines.append(f"City: {city}")
+
+    return lines
+
+
 def generate_fiscal_year_ledger_excel(
     sections: list[dict[str, object]],
     *,
     title: str = "Fiscal Year Ledger",
 ) -> bytes:
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
     workbook = Workbook()
@@ -1216,9 +1270,12 @@ def generate_fiscal_year_ledger_excel(
     section_font = Font(bold=True, size=12)
     table_header_font = Font(bold=True, size=10)
     header_fill = PatternFill("solid", fgColor="E8EEF7")
+    thin = Side(style="thin", color="000000")
+    table_border = Border(left=thin, right=thin, top=thin, bottom=thin)
     wrap = Alignment(wrap_text=True, vertical="top")
-    right = Alignment(horizontal="right", vertical="top")
-    center = Alignment(horizontal="center", vertical="top")
+    right = Alignment(horizontal="right", vertical="top", wrap_text=True)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_top = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
     columns = [
         "Date",
@@ -1230,92 +1287,127 @@ def generate_fiscal_year_ledger_excel(
         "Balance (Dr/Cr)",
     ]
     col_widths = [14, 16, 18, 42, 14, 14, 16]
+    table_start_col = 2
+    table_end_col = table_start_col + len(columns) - 1
 
     row_idx = 1
     for section in sections:
-        firm = section.get("firm", {}) or {}
+        supplier = section.get("supplier") or section.get("firm") or {}
         customer = section.get("customer", {}) or {}
         fy_label = str(section.get("fy_label", "")).strip()
         period_label = str(section.get("period_label", "")).strip()
         rows = section.get("rows") or []
         summary = section.get("summary") or {}
 
-        sheet.cell(row=row_idx, column=1, value=title).font = title_font
+        title_cell = sheet.cell(row=row_idx, column=table_start_col, value=title)
+        title_cell.font = title_font
+        title_cell.alignment = center
+        sheet.merge_cells(
+            start_row=row_idx,
+            start_column=table_start_col,
+            end_row=row_idx,
+            end_column=table_end_col,
+        )
         row_idx += 2
 
-        firm_lines = [
-            ("Name", firm.get("name", "")),
-            ("GSTIN", firm.get("gstin", "")),
-            ("PAN", firm.get("pan", "")),
-            ("Bank A/C", firm.get("account_no", "")),
-            ("IFSC", firm.get("ifsc", "")),
+        sheet.cell(row=row_idx, column=table_start_col, value="Supplier Details").font = header_font
+        sheet.cell(row=row_idx, column=table_start_col + 4, value="Customer Details").font = header_font
+        row_idx += 1
+
+        supplier_lines = [
+            f"GSTIN: {supplier.get('gstin', '')}",
+            f"PAN: {supplier.get('pan', '')}",
+            f"Bank A/C: {supplier.get('account_no', '')}",
+            f"IFSC: {supplier.get('ifsc', '')}",
         ]
-        customer_lines = [
-            ("Name", customer.get("name", "")),
-            ("GSTIN", customer.get("gstin", "")),
-            ("Address", customer.get("address", "")),
-        ]
-        max_lines = max(len(firm_lines), len(customer_lines))
+        customer_lines = [f"Name: {customer.get('name', '')}", f"GSTIN: {customer.get('gstin', '')}"]
+        customer_lines.extend(customer.get("address_lines") or format_customer_address_lines(customer))
+        max_lines = max(len(supplier_lines), len(customer_lines))
         for line_no in range(max_lines):
-            if line_no < len(firm_lines):
-                label, value = firm_lines[line_no]
-                sheet.cell(row=row_idx, column=1, value=f"{label}: {value}").font = header_font
+            if line_no < len(supplier_lines):
+                cell = sheet.cell(row=row_idx, column=table_start_col, value=supplier_lines[line_no])
+                cell.font = header_font
+                cell.alignment = left_top
             if line_no < len(customer_lines):
-                label, value = customer_lines[line_no]
-                sheet.cell(row=row_idx, column=5, value=f"{label}: {value}").font = header_font
+                cell = sheet.cell(row=row_idx, column=table_start_col + 4, value=customer_lines[line_no])
+                cell.alignment = left_top
             row_idx += 1
 
         row_idx += 1
-        sheet.cell(row=row_idx, column=1, value=fy_label).font = section_font
+        fy_cell = sheet.cell(row=row_idx, column=table_start_col, value=fy_label)
+        fy_cell.font = section_font
         if period_label:
-            sheet.cell(row=row_idx, column=5, value=period_label).font = section_font
+            period_cell = sheet.cell(row=row_idx, column=table_start_col + 4, value=period_label)
+            period_cell.font = section_font
         row_idx += 1
 
-        for col_no, label in enumerate(columns, start=1):
+        header_row = row_idx
+        for offset, label in enumerate(columns):
+            col_no = table_start_col + offset
             cell = sheet.cell(row=row_idx, column=col_no, value=label)
             cell.font = table_header_font
             cell.fill = header_fill
             cell.alignment = center
+            cell.border = table_border
         row_idx += 1
 
-        table_start = row_idx
+        data_start_row = row_idx
         for entry in rows:
-            for col_no, label in enumerate(columns, start=1):
+            for offset, label in enumerate(columns):
+                col_no = table_start_col + offset
                 value = entry.get(label, "")
                 if label in {"Debit", "Credit"}:
                     amount = _ledger_cell_amount(value)
                     cell = sheet.cell(row=row_idx, column=col_no, value=amount)
                     cell.number_format = "#,##0.00"
                     cell.alignment = right
+                elif label == "Balance (Dr/Cr)":
+                    cell = sheet.cell(
+                        row=row_idx,
+                        column=col_no,
+                        value=str(value if value is not None else ""),
+                    )
+                    cell.alignment = right
                 else:
                     cell = sheet.cell(row=row_idx, column=col_no, value=value if value is not None else "")
-                    cell.alignment = wrap if label == "Particulars" else Alignment(vertical="top")
+                    cell.alignment = wrap if label == "Particulars" else left_top
+                cell.border = table_border
             row_idx += 1
+        data_end_row = row_idx - 1
 
         row_idx += 1
         summary_rows = [
-            ("Opening Balance", summary.get("opening_display", "")),
-            ("Total Debit", summary.get("total_debit", 0.0)),
-            ("Total Credit", summary.get("total_credit", 0.0)),
-            ("Closing Balance", summary.get("closing_display", "")),
+            ("Opening Balance", summary.get("opening_display", ""), None),
+            ("Total Debit", summary.get("total_debit", 0.0), "debit"),
+            ("Total Credit", summary.get("total_credit", 0.0), "credit"),
+            ("Closing Balance", summary.get("closing_display", ""), None),
         ]
-        for label, value in summary_rows:
-            sheet.cell(row=row_idx, column=4, value=label).font = header_font
-            if label in {"Total Debit", "Total Credit"}:
+        for label, value, amount_kind in summary_rows:
+            label_col = table_start_col + 2
+            sheet.cell(row=row_idx, column=label_col, value=label).font = header_font
+            if amount_kind == "debit":
                 amount = _ledger_cell_amount(value)
-                cell = sheet.cell(row=row_idx, column=5 if label == "Total Debit" else 6, value=amount)
+                cell = sheet.cell(row=row_idx, column=table_start_col + 4, value=amount)
+                cell.number_format = "#,##0.00"
+                cell.font = header_font
+                cell.alignment = right
+            elif amount_kind == "credit":
+                amount = _ledger_cell_amount(value)
+                cell = sheet.cell(row=row_idx, column=table_start_col + 5, value=amount)
                 cell.number_format = "#,##0.00"
                 cell.font = header_font
                 cell.alignment = right
             else:
-                sheet.cell(row=row_idx, column=7, value=value).font = header_font
+                cell = sheet.cell(row=row_idx, column=table_end_col, value=str(value))
+                cell.font = header_font
+                cell.alignment = right
             row_idx += 1
 
         row_idx += 3
-        del table_start  # reserved for future table styling hooks
 
-    for idx, width in enumerate(col_widths, start=1):
-        sheet.column_dimensions[get_column_letter(idx)].width = width
+    for idx, width in enumerate(col_widths, start=0):
+        sheet.column_dimensions[get_column_letter(table_start_col + idx)].width = width
+    sheet.column_dimensions[get_column_letter(1)].width = 3
 
     output = io.BytesIO()
     workbook.save(output)
@@ -1335,10 +1427,9 @@ def generate_fiscal_year_ledger_pdf(
     page_size = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=page_size)
     width, height = page_size
-    left_x = 12 * mm
-    right_block_x = width / 2 + 8 * mm
-    table_left = left_x
-    table_width = width - 24 * mm
+    table_width = width - 36 * mm
+    table_left = (width - table_width) / 2
+    right_block_x = table_left + table_width / 2 + 4 * mm
     col_fracs = [0.1, 0.12, 0.12, 0.34, 0.1, 0.1, 0.12]
     col_widths = [table_width * frac for frac in col_fracs]
     columns = [
@@ -1351,60 +1442,96 @@ def generate_fiscal_year_ledger_pdf(
         "Balance (Dr/Cr)",
     ]
     row_height = 5.5 * mm
-    bottom_limit = 18 * mm
-
-    def _draw_section_header(y_pos: float, firm: dict, customer: dict, fy_label: str, period_label: str) -> float:
-        pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(left_x, y_pos, title)
-        y_pos -= 8 * mm
-        pdf.setFont("Helvetica-Bold", 9)
-        pdf.drawString(left_x, y_pos, "Firm Details")
-        pdf.drawString(right_block_x, y_pos, "Customer Details")
-        y_pos -= 5 * mm
-        pdf.setFont("Helvetica", 8)
-        firm_lines = [
-            f"Name: {firm.get('name', '')}",
-            f"GSTIN: {firm.get('gstin', '')}",
-            f"PAN: {firm.get('pan', '')}",
-            f"Bank A/C: {firm.get('account_no', '')}",
-            f"IFSC: {firm.get('ifsc', '')}",
-        ]
-        customer_lines = [
-            f"Name: {customer.get('name', '')}",
-            f"GSTIN: {customer.get('gstin', '')}",
-            f"Address: {customer.get('address', '')}",
-        ]
-        max_lines = max(len(firm_lines), len(customer_lines))
-        start_y = y_pos
-        for idx in range(max_lines):
-            if idx < len(firm_lines):
-                pdf.drawString(left_x, start_y - idx * 4.2 * mm, firm_lines[idx][:70])
-            if idx < len(customer_lines):
-                pdf.drawString(right_block_x, start_y - idx * 4.2 * mm, customer_lines[idx][:70])
-        y_pos = start_y - max_lines * 4.2 * mm - 4 * mm
-        pdf.setFont("Helvetica-Bold", 11)
-        pdf.drawString(left_x, y_pos, fy_label)
-        if period_label:
-            pdf.drawRightString(width - 12 * mm, y_pos, period_label)
-        return y_pos - 6 * mm
-
-    def _draw_table_header(y_pos: float) -> float:
-        pdf.setFont("Helvetica-Bold", 7.5)
-        x = table_left
-        for label, col_w in zip(columns, col_widths):
-            if label in {"Debit", "Credit", "Balance (Dr/Cr)"}:
-                pdf.drawRightString(x + col_w - 1 * mm, y_pos, label)
-            else:
-                pdf.drawString(x + 1 * mm, y_pos, label)
-            x += col_w
-        return y_pos - row_height
+    bottom_limit = 22 * mm
 
     def _format_amount(value: object) -> str:
         amount = _ledger_cell_amount(value)
         return f"{amount:,.2f}" if amount is not None else ""
 
+    def _draw_cell_border(x_pos: float, y_top: float, col_w: float, row_h: float) -> None:
+        pdf.rect(x_pos, y_top - row_h, col_w, row_h, stroke=1, fill=0)
+
+    def _draw_section_header(
+        y_pos: float,
+        supplier: dict,
+        customer: dict,
+        fy_label: str,
+        period_label: str,
+    ) -> float:
+        pdf.setFont("Helvetica-Bold", 14)
+        pdf.drawCentredString(width / 2, y_pos, title)
+        y_pos -= 8 * mm
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(table_left, y_pos, "Supplier Details")
+        pdf.drawString(right_block_x, y_pos, "Customer Details")
+        y_pos -= 5 * mm
+        pdf.setFont("Helvetica", 8)
+        supplier_lines = [
+            f"GSTIN: {supplier.get('gstin', '')}",
+            f"PAN: {supplier.get('pan', '')}",
+            f"Bank A/C: {supplier.get('account_no', '')}",
+            f"IFSC: {supplier.get('ifsc', '')}",
+        ]
+        customer_lines = [
+            f"Name: {customer.get('name', '')}",
+            f"GSTIN: {customer.get('gstin', '')}",
+        ]
+        address_lines = customer.get("address_lines") or format_customer_address_lines(customer)
+        customer_lines.extend(address_lines)
+        line_count = max(len(supplier_lines), len(customer_lines))
+        start_y = y_pos
+        line_step = 4.0 * mm
+        for idx in range(line_count):
+            line_y = start_y - idx * line_step
+            if idx < len(supplier_lines):
+                pdf.drawString(table_left, line_y, supplier_lines[idx][:72])
+            if idx < len(customer_lines):
+                wrapped = textwrap.wrap(customer_lines[idx], width=52)
+                for wrap_idx, part in enumerate(wrapped[:2]):
+                    pdf.drawString(right_block_x, line_y - wrap_idx * 3.6 * mm, part[:72])
+        y_pos = start_y - line_count * line_step - 4 * mm
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(table_left, y_pos, fy_label)
+        if period_label:
+            pdf.drawRightString(table_left + table_width, y_pos, period_label)
+        return y_pos - 6 * mm
+
+    def _draw_table_header(y_pos: float) -> float:
+        y_top = y_pos + row_height
+        x = table_left
+        pdf.setFont("Helvetica-Bold", 7.5)
+        for label, col_w in zip(columns, col_widths):
+            _draw_cell_border(x, y_top, col_w, row_height)
+            if label in {"Debit", "Credit", "Balance (Dr/Cr)"}:
+                pdf.drawCentredString(x + col_w / 2, y_pos + 1.5 * mm, label)
+            else:
+                pdf.drawCentredString(x + col_w / 2, y_pos + 1.5 * mm, label)
+            x += col_w
+        return y_pos - row_height
+
+    def _draw_table_row(y_pos: float, entry: dict[str, object]) -> float:
+        y_top = y_pos + row_height
+        x = table_left
+        values = [
+            str(entry.get("Date", "") or ""),
+            str(entry.get("Voucher Type", "") or ""),
+            str(entry.get("Voucher No.", "") or ""),
+            str(entry.get("Particulars", "") or ""),
+            _format_amount(entry.get("Debit", "")),
+            _format_amount(entry.get("Credit", "")),
+            str(entry.get("Balance (Dr/Cr)", "") or ""),
+        ]
+        for value, col_w in zip(values, col_widths):
+            _draw_cell_border(x, y_top, col_w, row_height)
+            if col_w in {col_widths[4], col_widths[5], col_widths[6]}:
+                pdf.drawRightString(x + col_w - 1.5 * mm, y_pos + 1.5 * mm, value[:24])
+            else:
+                pdf.drawString(x + 1.5 * mm, y_pos + 1.5 * mm, value[:52])
+            x += col_w
+        return y_pos - row_height
+
     for section in sections:
-        firm = section.get("firm", {}) or {}
+        supplier = section.get("supplier") or section.get("firm") or {}
         customer = section.get("customer", {}) or {}
         fy_label = str(section.get("fy_label", "")).strip()
         period_label = str(section.get("period_label", "")).strip()
@@ -1412,7 +1539,7 @@ def generate_fiscal_year_ledger_pdf(
         summary = section.get("summary") or {}
 
         y = height - 16 * mm
-        y = _draw_section_header(y, firm, customer, fy_label, period_label)
+        y = _draw_section_header(y, supplier, customer, fy_label, period_label)
         y = _draw_table_header(y)
         pdf.setFont("Helvetica", 7.5)
 
@@ -1422,37 +1549,22 @@ def generate_fiscal_year_ledger_pdf(
                 y = height - 16 * mm
                 y = _draw_table_header(y)
                 pdf.setFont("Helvetica", 7.5)
-            x = table_left
-            values = [
-                str(entry.get("Date", "") or ""),
-                str(entry.get("Voucher Type", "") or ""),
-                str(entry.get("Voucher No.", "") or ""),
-                str(entry.get("Particulars", "") or ""),
-                _format_amount(entry.get("Debit", "")),
-                _format_amount(entry.get("Credit", "")),
-                str(entry.get("Balance (Dr/Cr)", "") or ""),
-            ]
-            for value, col_w in zip(values, col_widths):
-                if col_w == col_widths[4] or col_w == col_widths[5] or col_w == col_widths[6]:
-                    pdf.drawRightString(x + col_w - 1 * mm, y, value[:24])
-                else:
-                    pdf.drawString(x + 1 * mm, y, value[:48])
-                x += col_w
-            y -= row_height
+            y = _draw_table_row(y, entry)
 
         y -= 4 * mm
         pdf.setFont("Helvetica-Bold", 8)
-        pdf.drawString(table_left + col_widths[0] + col_widths[1] + col_widths[2], y, "Opening Balance:")
-        pdf.drawRightString(table_left + sum(col_widths[:7]), y, str(summary.get("opening_display", "")))
+        summary_x = table_left + col_widths[0] + col_widths[1] + col_widths[2]
+        pdf.drawString(summary_x, y, "Opening Balance:")
+        pdf.drawRightString(table_left + sum(col_widths), y, str(summary.get("opening_display", "")))
         y -= row_height
-        pdf.drawString(table_left + col_widths[0] + col_widths[1] + col_widths[2], y, "Total Debit:")
+        pdf.drawString(summary_x, y, "Total Debit:")
         pdf.drawRightString(table_left + sum(col_widths[:5]), y, _format_amount(summary.get("total_debit", 0)))
         y -= row_height
-        pdf.drawString(table_left + col_widths[0] + col_widths[1] + col_widths[2], y, "Total Credit:")
+        pdf.drawString(summary_x, y, "Total Credit:")
         pdf.drawRightString(table_left + sum(col_widths[:6]), y, _format_amount(summary.get("total_credit", 0)))
         y -= row_height
-        pdf.drawString(table_left + col_widths[0] + col_widths[1] + col_widths[2], y, "Closing Balance:")
-        pdf.drawRightString(table_left + sum(col_widths[:7]), y, str(summary.get("closing_display", "")))
+        pdf.drawString(summary_x, y, "Closing Balance:")
+        pdf.drawRightString(table_left + sum(col_widths), y, str(summary.get("closing_display", "")))
         pdf.showPage()
 
     pdf.save()

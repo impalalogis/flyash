@@ -885,14 +885,44 @@ def _build_fiscal_year_ledger_sections(
             if credit > 0.005:
                 fy_totals[txn_fy]["total_credit"] += credit
 
-    sections: list[dict[str, object]] = []
-    for fy in fy_years:
+    first_fy = min(fy_years)
+    last_fy = max(max(fy_years), _fy_start_year(date.today()))
+    ordered_fys = list(range(first_fy, last_fy + 1))
+
+    previous_closing = 0.0
+    for fy in ordered_fys:
+        if fy not in fy_opening:
+            fy_opening[fy] = previous_closing
+            period_start, _ = _fy_period_bounds(fy)
+            opening = previous_closing
+            opening_row = {
+                "Date": _format_ledger_date(period_start),
+                "Voucher Type": "Opening Balance",
+                "Voucher No.": "",
+                "Particulars": (
+                    f"B/F from {_fy_full_label(fy - 1)}"
+                    if fy > first_fy
+                    else "Balance B/F"
+                ),
+                "Debit": opening if opening > 0.005 else 0.0,
+                "Credit": abs(opening) if opening < -0.005 else 0.0,
+                "Balance (Dr/Cr)": utils.format_ledger_balance_dr_cr(opening),
+            }
+            fy_rows[fy] = [opening_row]
+            fy_totals.setdefault(fy, {"total_debit": 0.0, "total_credit": 0.0})
         opening = fy_opening.get(fy, 0.0)
-        totals = fy_totals[fy]
+        totals = fy_totals.get(fy, {"total_debit": 0.0, "total_credit": 0.0})
+        previous_closing = opening + totals["total_debit"] - totals["total_credit"]
+
+    sections: list[dict[str, object]] = []
+    for fy in ordered_fys:
+        opening = fy_opening.get(fy, 0.0)
+        totals = fy_totals.get(fy, {"total_debit": 0.0, "total_credit": 0.0})
         closing = opening + totals["total_debit"] - totals["total_credit"]
         period_start, period_end = _fy_period_bounds(fy)
         sections.append(
             {
+                "fy_start_year": fy,
                 "fy_label": _fy_full_label(fy),
                 "period_label": (
                     f"{_format_ledger_date(period_start)} to {_format_ledger_date(period_end)}"
@@ -909,6 +939,26 @@ def _build_fiscal_year_ledger_sections(
             }
         )
     return sections
+
+
+def _fiscal_supplier_details(
+    company_info: dict[str, str],
+    payment_details: dict[str, str],
+) -> dict[str, str]:
+    return {
+        "gstin": company_info.get("gst", ""),
+        "pan": str(payment_details.get("pan", "BJQPS7761G")).strip() or "BJQPS7761G",
+        "account_no": str(payment_details.get("account_no", "7392892219")).strip() or "7392892219",
+        "ifsc": str(payment_details.get("ifsc", "IDIB000B171")).strip() or "IDIB000B171",
+    }
+
+
+def _fiscal_customer_details(customer_row: pd.Series) -> dict[str, object]:
+    return {
+        "name": str(customer_row.get("Name", "")).strip(),
+        "gstin": str(customer_row.get("GST", "")).strip(),
+        "address_lines": utils.format_customer_address_lines(customer_row),
+    }
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -1861,47 +1911,43 @@ def render() -> None:
         if not fy_sections:
             st.info("No fiscal year ledger entries for the selected customer.")
         else:
+            fy_options = {section["fy_label"]: section for section in fy_sections}
+            selected_fy_label = st.selectbox(
+                "Fiscal Year",
+                list(fy_options.keys()),
+                index=len(fy_options) - 1,
+                key="fy_ledger_year",
+            )
+            selected_section = fy_options[selected_fy_label]
+
             company_info, branding = _resolve_invoice_settings(
                 company_defaults, branding_defaults, payment_defaults
             )
             payment_details = branding.get("payment_details") or {}
-            firm_details = {
-                "name": company_info.get("name", ""),
-                "gstin": company_info.get("gst", ""),
-                "pan": str(payment_details.get("pan", "BJQPS7761G")).strip() or "BJQPS7761G",
-                "account_no": str(payment_details.get("account_no", "7392892219")).strip()
-                or "7392892219",
-                "ifsc": str(payment_details.get("ifsc", "IDIB000B171")).strip() or "IDIB000B171",
-            }
-            customer_details = {
-                "name": str(fy_customer_row.get("Name", "")).strip(),
-                "gstin": str(fy_customer_row.get("GST", "")).strip(),
-                "address": str(fy_customer_row.get("Address", "")).strip(),
-            }
-            export_sections = []
-            preview_frames: list[pd.DataFrame] = []
-            for section in fy_sections:
-                section_payload = dict(section)
-                section_payload["firm"] = firm_details
-                section_payload["customer"] = customer_details
-                export_sections.append(section_payload)
-                section_df = pd.DataFrame(section.get("rows") or [], columns=FISCAL_LEDGER_COLUMNS)
-                if not section_df.empty:
-                    section_df.insert(0, "Fiscal Year", section.get("fy_label", ""))
-                    preview_frames.append(section_df)
+            supplier_details = _fiscal_supplier_details(company_info, payment_details)
+            customer_details = _fiscal_customer_details(fy_customer_row)
 
-            if preview_frames:
-                st.dataframe(pd.concat(preview_frames, ignore_index=True), use_container_width=True)
+            section_payload = dict(selected_section)
+            section_payload["supplier"] = supplier_details
+            section_payload["customer"] = customer_details
+            export_sections = [section_payload]
 
-            for section in fy_sections:
-                summary = section.get("summary") or {}
-                st.caption(
-                    f"{section.get('fy_label', '')} ({section.get('period_label', '')}) — "
-                    f"Opening {summary.get('opening_display', '')}, "
-                    f"Closing {summary.get('closing_display', '')}"
-                )
+            preview_df = pd.DataFrame(
+                selected_section.get("rows") or [],
+                columns=FISCAL_LEDGER_COLUMNS,
+            )
+            st.dataframe(preview_df, use_container_width=True)
+
+            summary = selected_section.get("summary") or {}
+            summary_cols = st.columns(4)
+            summary_cols[0].metric("Opening Balance", summary.get("opening_display", ""))
+            summary_cols[1].metric("Total Debit", f"{summary.get('total_debit', 0.0):,.2f}")
+            summary_cols[2].metric("Total Credit", f"{summary.get('total_credit', 0.0):,.2f}")
+            summary_cols[3].metric("Closing Balance", summary.get("closing_display", ""))
+            st.caption(selected_section.get("period_label", ""))
 
             file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", fy_ledger_customer_label)
+            fy_suffix = re.sub(r"[^A-Za-z0-9_-]+", "_", selected_fy_label)
             excel_bytes = utils.generate_fiscal_year_ledger_excel(
                 export_sections,
                 title="Fiscal Year Ledger",
@@ -1909,7 +1955,7 @@ def render() -> None:
             st.download_button(
                 "Download Fiscal Year Ledger (Excel)",
                 data=excel_bytes,
-                file_name=f"fiscal_year_ledger_{file_label}.xlsx",
+                file_name=f"fiscal_year_ledger_{file_label}_{fy_suffix}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_fy_ledger_excel",
             )
@@ -1920,7 +1966,7 @@ def render() -> None:
             st.download_button(
                 "Download Fiscal Year Ledger (PDF)",
                 data=pdf_bytes,
-                file_name=f"fiscal_year_ledger_{file_label}.pdf",
+                file_name=f"fiscal_year_ledger_{file_label}_{fy_suffix}.pdf",
                 mime="application/pdf",
                 key="download_fy_ledger_pdf",
             )
