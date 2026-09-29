@@ -1252,13 +1252,48 @@ def format_customer_address_lines(row: object) -> list[str]:
     return lines
 
 
-def _estimate_wrapped_line_count(text: object, column_width: float) -> int:
+def _estimate_wrapped_line_count(
+    text: object,
+    column_width: float,
+    *,
+    tight: bool = False,
+) -> int:
     value = str(text or "").strip()
     if not value:
         return 1
-    chars_per_line = max(8, int(column_width * 1.15))
+    scale = 0.85 if tight else 1.15
+    min_chars = 6 if tight else 8
+    chars_per_line = max(min_chars, int(column_width * scale))
     lines = textwrap.wrap(value, width=chars_per_line) or [value]
     return max(1, len(lines))
+
+
+def format_fiscal_invoice_total_particulars(
+    amount: float,
+    freight: float,
+    gst: float,
+    *,
+    stored_total: object | None = None,
+) -> tuple[str, float, float]:
+    exact_total = round_down_2(amount + freight + gst)
+    stored_value = safe_float(stored_total, 0.0)
+    if stored_value > 0.005:
+        rounded_total = float(round_down_0(stored_value))
+    else:
+        rounded_total = float(round_up_0(exact_total))
+    round_delta = round_down_2(
+        Decimal(str(rounded_total)) - Decimal(str(exact_total))
+    )
+    rounded_label = f"{int(rounded_total):,}"
+    if round_delta >= 0:
+        adjustment_text = f"Round up {round_delta:.2f}"
+    else:
+        adjustment_text = f"Round down {abs(round_delta):.2f}"
+    particulars = (
+        f"Invoice Total — {rounded_label} "
+        f"(amount: {exact_total:,.2f}, {adjustment_text})"
+    )
+    return particulars, exact_total, round_delta
 
 
 def generate_fiscal_year_ledger_excel(
@@ -1296,7 +1331,7 @@ def generate_fiscal_year_ledger_excel(
         "Credit",
         "Balance (Dr/Cr)",
     ]
-    col_widths = [14, 16, 18, 42, 14, 14, 16]
+    col_widths = [14, 14, 22, 40, 14, 14, 16]
     table_start_col = 2
     table_end_col = table_start_col + len(columns) - 1
 
@@ -1366,9 +1401,14 @@ def generate_fiscal_year_ledger_excel(
             for offset, label in enumerate(columns):
                 col_no = table_start_col + offset
                 value = entry.get(label, "")
+                tight_wrap = label == "Voucher No."
                 row_line_count = max(
                     row_line_count,
-                    _estimate_wrapped_line_count(value, col_widths[offset]),
+                    _estimate_wrapped_line_count(
+                        value,
+                        col_widths[offset],
+                        tight=tight_wrap,
+                    ),
                 )
                 if label in {"Debit", "Credit"}:
                     amount = _ledger_cell_amount(value)
@@ -1384,7 +1424,15 @@ def generate_fiscal_year_ledger_excel(
                     cell.alignment = right
                 else:
                     cell = sheet.cell(row=row_idx, column=col_no, value=value if value is not None else "")
-                    cell.alignment = left_top
+                    if label == "Voucher No.":
+                        cell.alignment = Alignment(
+                            horizontal="left",
+                            vertical="top",
+                            wrap_text=True,
+                            shrink_to_fit=False,
+                        )
+                    else:
+                        cell.alignment = left_top
                 cell.border = table_border
                 if entry.get("_row_style") == "invoice_total":
                     cell.font = invoice_total_font
@@ -1447,7 +1495,7 @@ def generate_fiscal_year_ledger_pdf(
     table_width = width - 36 * mm
     table_left = (width - table_width) / 2
     right_block_x = table_left + table_width / 2 + 4 * mm
-    col_fracs = [0.1, 0.12, 0.12, 0.34, 0.1, 0.1, 0.12]
+    col_fracs = [0.1, 0.11, 0.14, 0.32, 0.1, 0.1, 0.13]
     col_widths = [table_width * frac for frac in col_fracs]
     columns = [
         "Date",
@@ -1559,11 +1607,14 @@ def generate_fiscal_year_ledger_pdf(
         ]
         wrapped_cells: list[list[str]] = []
         max_lines = 1
-        for value, col_w in zip(values, col_widths):
+        for col_idx, (value, col_w) in enumerate(zip(values, col_widths)):
+            bold_cell = is_invoice_total and col_idx == 3
             if col_w in {col_widths[4], col_widths[5], col_widths[6]}:
-                lines = _wrap_pdf_lines(value, col_w, bold=is_invoice_total)
+                lines = _wrap_pdf_lines(value, col_w, bold=bold_cell)
+            elif col_idx == 2:
+                lines = _wrap_pdf_lines(value, col_w - 1 * mm, bold=False)
             else:
-                lines = _wrap_pdf_lines(value, col_w, bold=is_invoice_total and col_w == col_widths[3])
+                lines = _wrap_pdf_lines(value, col_w, bold=bold_cell)
             wrapped_cells.append(lines)
             max_lines = max(max_lines, len(lines))
         row_height = max(base_row_height, max_lines * line_step + 1.5 * mm)
