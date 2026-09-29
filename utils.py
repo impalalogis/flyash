@@ -1252,6 +1252,15 @@ def format_customer_address_lines(row: object) -> list[str]:
     return lines
 
 
+def _estimate_wrapped_line_count(text: object, column_width: float) -> int:
+    value = str(text or "").strip()
+    if not value:
+        return 1
+    chars_per_line = max(8, int(column_width * 1.15))
+    lines = textwrap.wrap(value, width=chars_per_line) or [value]
+    return max(1, len(lines))
+
+
 def generate_fiscal_year_ledger_excel(
     sections: list[dict[str, object]],
     *,
@@ -1269,6 +1278,7 @@ def generate_fiscal_year_ledger_excel(
     title_font = Font(bold=True, size=14)
     section_font = Font(bold=True, size=12)
     table_header_font = Font(bold=True, size=10)
+    invoice_total_font = Font(bold=True, size=10)
     header_fill = PatternFill("solid", fgColor="E8EEF7")
     thin = Side(style="thin", color="000000")
     table_border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -1351,11 +1361,15 @@ def generate_fiscal_year_ledger_excel(
             cell.border = table_border
         row_idx += 1
 
-        data_start_row = row_idx
         for entry in rows:
+            row_line_count = 1
             for offset, label in enumerate(columns):
                 col_no = table_start_col + offset
                 value = entry.get(label, "")
+                row_line_count = max(
+                    row_line_count,
+                    _estimate_wrapped_line_count(value, col_widths[offset]),
+                )
                 if label in {"Debit", "Credit"}:
                     amount = _ledger_cell_amount(value)
                     cell = sheet.cell(row=row_idx, column=col_no, value=amount)
@@ -1370,10 +1384,12 @@ def generate_fiscal_year_ledger_excel(
                     cell.alignment = right
                 else:
                     cell = sheet.cell(row=row_idx, column=col_no, value=value if value is not None else "")
-                    cell.alignment = wrap if label == "Particulars" else left_top
+                    cell.alignment = left_top
                 cell.border = table_border
+                if entry.get("_row_style") == "invoice_total":
+                    cell.font = invoice_total_font
+            sheet.row_dimensions[row_idx].height = min(15 * row_line_count, 120)
             row_idx += 1
-        data_end_row = row_idx - 1
 
         row_idx += 1
         summary_rows = [
@@ -1421,6 +1437,7 @@ def generate_fiscal_year_ledger_pdf(
 ) -> bytes:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfgen import canvas
 
     buffer = io.BytesIO()
@@ -1441,12 +1458,35 @@ def generate_fiscal_year_ledger_pdf(
         "Credit",
         "Balance (Dr/Cr)",
     ]
-    row_height = 5.5 * mm
+    base_row_height = 5.5 * mm
+    line_step = 3.6 * mm
     bottom_limit = 22 * mm
+    font_name = "Helvetica"
+    font_size = 7.5
 
     def _format_amount(value: object) -> str:
         amount = _ledger_cell_amount(value)
         return f"{amount:,.2f}" if amount is not None else ""
+
+    def _wrap_pdf_lines(text: object, max_width: float, *, bold: bool = False) -> list[str]:
+        value = str(text or "").strip()
+        if not value:
+            return [""]
+        font = "Helvetica-Bold" if bold else font_name
+        words = value.split()
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if pdfmetrics.stringWidth(candidate, font, font_size) <= max_width - 2 * mm:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines or [""]
 
     def _draw_cell_border(x_pos: float, y_top: float, col_w: float, row_h: float) -> None:
         pdf.rect(x_pos, y_top - row_h, col_w, row_h, stroke=1, fill=0)
@@ -1497,21 +1537,17 @@ def generate_fiscal_year_ledger_pdf(
         return y_pos - 6 * mm
 
     def _draw_table_header(y_pos: float) -> float:
-        y_top = y_pos + row_height
+        y_top = y_pos + base_row_height
         x = table_left
-        pdf.setFont("Helvetica-Bold", 7.5)
+        pdf.setFont("Helvetica-Bold", font_size)
         for label, col_w in zip(columns, col_widths):
-            _draw_cell_border(x, y_top, col_w, row_height)
-            if label in {"Debit", "Credit", "Balance (Dr/Cr)"}:
-                pdf.drawCentredString(x + col_w / 2, y_pos + 1.5 * mm, label)
-            else:
-                pdf.drawCentredString(x + col_w / 2, y_pos + 1.5 * mm, label)
+            _draw_cell_border(x, y_top, col_w, base_row_height)
+            pdf.drawCentredString(x + col_w / 2, y_pos + 1.5 * mm, label)
             x += col_w
-        return y_pos - row_height
+        return y_pos - base_row_height
 
     def _draw_table_row(y_pos: float, entry: dict[str, object]) -> float:
-        y_top = y_pos + row_height
-        x = table_left
+        is_invoice_total = entry.get("_row_style") == "invoice_total"
         values = [
             str(entry.get("Date", "") or ""),
             str(entry.get("Voucher Type", "") or ""),
@@ -1521,12 +1557,27 @@ def generate_fiscal_year_ledger_pdf(
             _format_amount(entry.get("Credit", "")),
             str(entry.get("Balance (Dr/Cr)", "") or ""),
         ]
+        wrapped_cells: list[list[str]] = []
+        max_lines = 1
         for value, col_w in zip(values, col_widths):
-            _draw_cell_border(x, y_top, col_w, row_height)
             if col_w in {col_widths[4], col_widths[5], col_widths[6]}:
-                pdf.drawRightString(x + col_w - 1.5 * mm, y_pos + 1.5 * mm, value[:24])
+                lines = _wrap_pdf_lines(value, col_w, bold=is_invoice_total)
             else:
-                pdf.drawString(x + 1.5 * mm, y_pos + 1.5 * mm, value[:52])
+                lines = _wrap_pdf_lines(value, col_w, bold=is_invoice_total and col_w == col_widths[3])
+            wrapped_cells.append(lines)
+            max_lines = max(max_lines, len(lines))
+        row_height = max(base_row_height, max_lines * line_step + 1.5 * mm)
+        y_top = y_pos + row_height
+        x = table_left
+        pdf.setFont("Helvetica-Bold" if is_invoice_total else font_name, font_size)
+        for lines, col_w in zip(wrapped_cells, col_widths):
+            _draw_cell_border(x, y_top, col_w, row_height)
+            for line_idx, line in enumerate(lines):
+                line_y = y_pos + row_height - line_step * (line_idx + 1)
+                if col_w in {col_widths[4], col_widths[5], col_widths[6]}:
+                    pdf.drawRightString(x + col_w - 1.5 * mm, line_y, line)
+                else:
+                    pdf.drawString(x + 1.5 * mm, line_y, line)
             x += col_w
         return y_pos - row_height
 
@@ -1556,13 +1607,13 @@ def generate_fiscal_year_ledger_pdf(
         summary_x = table_left + col_widths[0] + col_widths[1] + col_widths[2]
         pdf.drawString(summary_x, y, "Opening Balance:")
         pdf.drawRightString(table_left + sum(col_widths), y, str(summary.get("opening_display", "")))
-        y -= row_height
+        y -= base_row_height
         pdf.drawString(summary_x, y, "Total Debit:")
         pdf.drawRightString(table_left + sum(col_widths[:5]), y, _format_amount(summary.get("total_debit", 0)))
-        y -= row_height
+        y -= base_row_height
         pdf.drawString(summary_x, y, "Total Credit:")
         pdf.drawRightString(table_left + sum(col_widths[:6]), y, _format_amount(summary.get("total_credit", 0)))
-        y -= row_height
+        y -= base_row_height
         pdf.drawString(summary_x, y, "Closing Balance:")
         pdf.drawRightString(table_left + sum(col_widths), y, str(summary.get("closing_display", "")))
         pdf.showPage()
