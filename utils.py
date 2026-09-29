@@ -1281,6 +1281,8 @@ def _estimate_wrapped_line_count(
 def _fiscal_ledger_entry_value(entry: dict[str, object], column: str) -> object:
     if column == "Invoice Type":
         return entry.get("Invoice Type", entry.get("Voucher Type", ""))
+    if column == "Balance":
+        return entry.get("Balance (Dr/Cr)", entry.get("Balance", ""))
     return entry.get(column, "")
 
 
@@ -1343,7 +1345,7 @@ def generate_fiscal_year_ledger_excel(
         "Particulars",
         "Debit",
         "Credit",
-        "Balance (Dr/Cr)",
+        "Balance",
     ]
     col_widths = [14, 16, 48, 14, 14, 16]
     table_start_col = 2
@@ -1414,7 +1416,10 @@ def generate_fiscal_year_ledger_excel(
             row_line_count = 1
             for offset, label in enumerate(columns):
                 col_no = table_start_col + offset
-                value = _fiscal_ledger_entry_value(entry, label)
+                if label in {"Debit", "Credit"}:
+                    value = entry.get(label, "")
+                else:
+                    value = _fiscal_ledger_entry_value(entry, label)
                 row_line_count = max(
                     row_line_count,
                     _estimate_wrapped_line_count(
@@ -1428,7 +1433,7 @@ def generate_fiscal_year_ledger_excel(
                     cell = sheet.cell(row=row_idx, column=col_no, value=amount)
                     cell.number_format = "#,##0.00"
                     cell.alignment = right
-                elif label == "Balance (Dr/Cr)":
+                elif label == "Balance":
                     cell = sheet.cell(
                         row=row_idx,
                         column=col_no,
@@ -1439,9 +1444,10 @@ def generate_fiscal_year_ledger_excel(
                     cell = sheet.cell(row=row_idx, column=col_no, value=value if value is not None else "")
                     cell.alignment = wrap if label == "Particulars" else left_top
                 cell.border = table_border
-            sheet.row_dimensions[row_idx].height = min(15 * row_line_count, 120)
+            sheet.row_dimensions[row_idx].height = min(max(15 * row_line_count, 18), 150)
             row_idx += 1
 
+        sheet.print_title_rows = f"{header_row}:{header_row}"
         row_idx += 1
         summary_rows = [
             ("Opening Balance", summary.get("opening_display", ""), None),
@@ -1506,13 +1512,16 @@ def generate_fiscal_year_ledger_pdf(
         "Particulars",
         "Debit",
         "Credit",
-        "Balance (Dr/Cr)",
+        "Balance",
     ]
-    base_row_height = 5.5 * mm
+    header_height = 7.5 * mm
+    cell_padding = 2.0 * mm
     line_step = 3.6 * mm
-    bottom_limit = 22 * mm
+    min_row_height = 7.0 * mm
+    bottom_limit = 24 * mm
     font_name = "Helvetica"
     font_size = 7.5
+    header_font_size = 8.0
 
     def _format_amount(value: object) -> str:
         amount = _ledger_cell_amount(value)
@@ -1597,46 +1606,55 @@ def generate_fiscal_year_ledger_pdf(
             pdf.drawRightString(table_left + table_width, y_pos, period_label)
         return y_pos - 6 * mm
 
-    def _draw_table_header(y_pos: float) -> float:
-        y_top = y_pos + base_row_height
-        x = table_left
-        pdf.setFont("Helvetica-Bold", font_size)
-        for label, col_w in zip(columns, col_widths):
-            _draw_cell_border(x, y_top, col_w, base_row_height)
-            pdf.drawCentredString(x + col_w / 2, y_pos + 1.5 * mm, label)
-            x += col_w
-        return y_pos - base_row_height
-
-    def _draw_table_row(y_pos: float, entry: dict[str, object]) -> float:
-        values = [
+    def _row_values(entry: dict[str, object]) -> list[str]:
+        return [
             str(_fiscal_ledger_entry_value(entry, "Date") or ""),
             str(_fiscal_ledger_entry_value(entry, "Invoice Type") or ""),
             str(_fiscal_ledger_entry_value(entry, "Particulars") or ""),
             _format_amount(entry.get("Debit", "")),
             _format_amount(entry.get("Credit", "")),
-            str(entry.get("Balance (Dr/Cr)", "") or ""),
+            str(_fiscal_ledger_entry_value(entry, "Balance") or ""),
         ]
-        wrapped_cells: list[list[str]] = []
+
+    def _measure_row_height(entry: dict[str, object]) -> float:
+        values = _row_values(entry)
         max_lines = 1
-        numeric_cols = {col_widths[3], col_widths[4], col_widths[5]}
-        for col_idx, (value, col_w) in enumerate(zip(values, col_widths)):
-            lines = _wrap_pdf_lines(value, col_w, bold=False)
-            wrapped_cells.append(lines)
-            max_lines = max(max_lines, len(lines))
-        row_height = max(base_row_height, max_lines * line_step + 1.5 * mm)
-        y_top = y_pos + row_height
+        for value, col_w in zip(values, col_widths):
+            max_lines = max(max_lines, len(_wrap_pdf_lines(value, col_w - 2 * mm)))
+        return max(min_row_height, max_lines * line_step + (2 * cell_padding))
+
+    def _draw_table_header(top_y: float) -> float:
+        bottom_y = top_y - header_height
+        x = table_left
+        pdf.setFont("Helvetica-Bold", header_font_size)
+        text_y = bottom_y + (header_height / 2) - (header_font_size * 0.35)
+        for label, col_w in zip(columns, col_widths):
+            pdf.rect(x, bottom_y, col_w, header_height, stroke=1, fill=0)
+            pdf.drawCentredString(x + col_w / 2, text_y, label)
+            x += col_w
+        return bottom_y
+
+    def _draw_table_row(top_y: float, entry: dict[str, object], row_height: float) -> float:
+        bottom_y = top_y - row_height
+        values = _row_values(entry)
+        wrapped_cells = [
+            _wrap_pdf_lines(value, col_w - 2 * mm) for value, col_w in zip(values, col_widths)
+        ]
+        numeric_indices = {3, 4, 5}
         x = table_left
         pdf.setFont(font_name, font_size)
-        for lines, col_w in zip(wrapped_cells, col_widths):
-            _draw_cell_border(x, y_top, col_w, row_height)
+        for col_idx, (lines, col_w) in enumerate(zip(wrapped_cells, col_widths)):
+            pdf.rect(x, bottom_y, col_w, row_height, stroke=1, fill=0)
             for line_idx, line in enumerate(lines):
-                line_y = y_pos + row_height - line_step * (line_idx + 1)
-                if col_w in numeric_cols:
-                    pdf.drawRightString(x + col_w - 1.5 * mm, line_y, line)
+                line_y = bottom_y + cell_padding + (line_idx * line_step)
+                if col_idx in numeric_indices:
+                    pdf.drawRightString(x + col_w - cell_padding, line_y, line)
+                elif col_idx in {1, 2}:
+                    pdf.drawString(x + cell_padding, line_y, line)
                 else:
-                    pdf.drawString(x + 1.5 * mm, line_y, line)
+                    pdf.drawCentredString(x + col_w / 2, line_y, line)
             x += col_w
-        return y_pos - row_height
+        return bottom_y
 
     for section in sections:
         supplier = section.get("supplier") or section.get("firm") or {}
@@ -1648,29 +1666,30 @@ def generate_fiscal_year_ledger_pdf(
 
         y = height - 16 * mm
         y = _draw_section_header(y, supplier, customer, fy_label, period_label)
+        y -= 2 * mm
         y = _draw_table_header(y)
-        pdf.setFont("Helvetica", 7.5)
 
         for entry in rows:
-            if y < bottom_limit:
+            row_height = _measure_row_height(entry)
+            if y - row_height < bottom_limit:
                 pdf.showPage()
                 y = height - 16 * mm
                 y = _draw_table_header(y)
-                pdf.setFont("Helvetica", 7.5)
-            y = _draw_table_row(y, entry)
+            y = _draw_table_row(y, entry, row_height)
 
         y -= 4 * mm
         pdf.setFont("Helvetica-Bold", 8)
         summary_x = table_left + col_widths[0] + col_widths[1]
+        summary_line_height = 5 * mm
         pdf.drawString(summary_x, y, "Opening Balance:")
         pdf.drawRightString(table_left + sum(col_widths), y, str(summary.get("opening_display", "")))
-        y -= base_row_height
+        y -= summary_line_height
         pdf.drawString(summary_x, y, "Total Debit:")
         pdf.drawRightString(table_left + sum(col_widths[:4]), y, _format_amount(summary.get("total_debit", 0)))
-        y -= base_row_height
+        y -= summary_line_height
         pdf.drawString(summary_x, y, "Total Credit:")
         pdf.drawRightString(table_left + sum(col_widths[:5]), y, _format_amount(summary.get("total_credit", 0)))
-        y -= base_row_height
+        y -= summary_line_height
         pdf.drawString(summary_x, y, "Closing Balance:")
         pdf.drawRightString(table_left + sum(col_widths), y, str(summary.get("closing_display", "")))
         pdf.showPage()
