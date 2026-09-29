@@ -679,19 +679,21 @@ def _expand_sale_fiscal_lines(row: pd.Series, *, invoice_ref: str, date_display:
                 "Credit": 0.0,
             }
         )
-    invoice_total = utils.safe_float(
-        row.get("Adjusted_Total_amount", row.get("Total_Amount", 0.0))
+    stored_total = row.get("Adjusted_Total_amount", row.get("Total_Amount", 0.0))
+    invoice_particulars, _, round_delta = utils.format_fiscal_invoice_total_particulars(
+        amount,
+        freight,
+        gst,
+        stored_total=stored_total,
     )
-    if invoice_total <= 0.005:
-        invoice_total = amount + freight + gst
     lines.append(
         {
             "Date": "",
             "Voucher Type": "",
             "Voucher No.": "",
-            "Particulars": f"Invoice Total — {invoice_total:,.2f}",
-            "Debit": 0.0,
-            "Credit": 0.0,
+            "Particulars": invoice_particulars,
+            "Debit": round_delta if round_delta > 0.005 else 0.0,
+            "Credit": abs(round_delta) if round_delta < -0.005 else 0.0,
             "_row_style": "invoice_total",
         }
     )
