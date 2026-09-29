@@ -1183,12 +1183,13 @@ def generate_customer_ledger_pdf(
 
 
 def format_ledger_balance_dr_cr(balance: float) -> str:
-    rounded = round(safe_float(balance), 2)
-    if abs(rounded) < 0.005:
-        return "0.00"
+    rounded = round_down_2(balance)
+    magnitude = abs(rounded)
+    if magnitude < 0.005:
+        return "0.00 Dr"
     if rounded > 0:
-        return f"{rounded:,.2f} Dr"
-    return f"{abs(rounded):,.2f} Cr"
+        return f"{magnitude:,.2f} Dr"
+    return f"{magnitude:,.2f} Cr"
 
 
 def _ledger_cell_amount(value: object) -> float | None:
