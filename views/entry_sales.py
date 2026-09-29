@@ -896,7 +896,7 @@ def _build_fiscal_year_ledger_sections(
         for line in txn["lines"]:
             debit = utils.safe_float(line.get("Debit", 0.0))
             credit = utils.safe_float(line.get("Credit", 0.0))
-            running_balance += debit - credit
+            running_balance += credit - debit
             display_line = dict(line)
             display_line["Balance (Dr/Cr)"] = utils.format_ledger_balance_dr_cr(running_balance)
             fy_rows[txn_fy].append(display_line)
