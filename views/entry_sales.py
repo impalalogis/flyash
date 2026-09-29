@@ -607,8 +607,7 @@ def _build_customer_ledger_cached(customer_id: str) -> pd.DataFrame:
 FY_START_MONTH = 4
 FISCAL_LEDGER_COLUMNS = [
     "Date",
-    "Voucher Type",
-    "Voucher No.",
+    "Invoice Type",
     "Particulars",
     "Debit",
     "Credit",
@@ -647,57 +646,39 @@ def _expand_sale_fiscal_lines(row: pd.Series, *, invoice_ref: str, date_display:
     gst = utils.safe_float(
         row.get("GST(%12)", row.get("Gst (%12)", row.get("GST", 0.0)))
     )
-    lines: list[dict[str, object]] = [
-        {
-            "Date": date_display,
-            "Voucher Type": "Sales Invoice",
-            "Voucher No.": invoice_ref,
-            "Particulars": f"{product} (HSN {hsn_code}) | Qty {qty:,.0f} | Rate {rate:,.2f}",
-            "Debit": amount,
-            "Credit": 0.0,
-        }
-    ]
-    if freight > 0.005:
-        lines.append(
-            {
-                "Date": "",
-                "Voucher Type": "",
-                "Voucher No.": "",
-                "Particulars": "Freight",
-                "Debit": freight,
-                "Credit": 0.0,
-            }
-        )
-    if gst > 0.005:
-        lines.append(
-            {
-                "Date": "",
-                "Voucher Type": "",
-                "Voucher No.": "",
-                "Particulars": f"GST @ {GST_RATE:.0f}%",
-                "Debit": gst,
-                "Credit": 0.0,
-            }
-        )
     stored_total = row.get("Adjusted_Total_amount", row.get("Total_Amount", 0.0))
-    invoice_particulars, _, round_delta = utils.format_fiscal_invoice_total_particulars(
+    invoice_total_line, _, _ = utils.format_fiscal_invoice_total_particulars(
         amount,
         freight,
         gst,
         stored_total=stored_total,
     )
-    lines.append(
+    detail_lines = [
+        f"Invoice No: {invoice_ref}",
+        (
+            f"{product} (HSN {hsn_code}) | Qty {qty:,.0f} | "
+            f"Rate {rate:,.2f} | Selling Price {amount:,.2f}"
+        ),
+    ]
+    if freight > 0.005:
+        detail_lines.append(f"Freight: {freight:,.2f}")
+    detail_lines.append(f"GST @ {GST_RATE:.0f}%: {gst:,.2f}")
+    detail_lines.append(invoice_total_line)
+    stored_value = utils.safe_float(stored_total, 0.0)
+    exact_total = utils.round_down_2(amount + freight + gst)
+    if stored_value > 0.005:
+        debit = float(utils.round_down_0(stored_value))
+    else:
+        debit = float(utils.round_up_0(exact_total))
+    return [
         {
-            "Date": "",
-            "Voucher Type": "",
-            "Voucher No.": "",
-            "Particulars": invoice_particulars,
-            "Debit": round_delta if round_delta > 0.005 else 0.0,
-            "Credit": abs(round_delta) if round_delta < -0.005 else 0.0,
-            "_row_style": "invoice_total",
+            "Date": date_display,
+            "Invoice Type": "Sales Invoice",
+            "Particulars": "\n".join(detail_lines),
+            "Debit": debit,
+            "Credit": 0.0,
         }
-    )
-    return lines
+    ]
 
 
 def _expand_payment_fiscal_lines(
@@ -715,31 +696,22 @@ def _expand_payment_fiscal_lines(
         invoice_refs = [invoice_map.get(part, part) for part in invoice_parts]
     else:
         invoice_refs = []
-    particulars = "Payment received"
+    detail_lines = [f"Receipt No: {payment_id}"]
     if mode:
-        particulars = f"Payment received ({mode})"
-    lines: list[dict[str, object]] = [
+        detail_lines.append(f"Payment received ({mode})")
+    else:
+        detail_lines.append("Payment received")
+    if invoice_refs:
+        detail_lines.append(f"Against Invoice(s): {', '.join(invoice_refs)}")
+    return [
         {
             "Date": date_display,
-            "Voucher Type": "Receipt",
-            "Voucher No.": payment_id,
-            "Particulars": particulars,
+            "Invoice Type": "Receipt",
+            "Particulars": "\n".join(detail_lines),
             "Debit": 0.0,
             "Credit": applied,
         }
     ]
-    for invoice_ref in invoice_refs:
-        lines.append(
-            {
-                "Date": "",
-                "Voucher Type": "",
-                "Voucher No.": invoice_ref,
-                "Particulars": "Against invoice",
-                "Debit": 0.0,
-                "Credit": 0.0,
-            }
-        )
-    return lines
 
 
 def _build_fiscal_year_ledger_sections(
@@ -878,8 +850,7 @@ def _build_fiscal_year_ledger_sections(
                 opening = running_balance
                 opening_row = {
                     "Date": _format_ledger_date(period_start),
-                    "Voucher Type": "Opening Balance",
-                    "Voucher No.": "",
+                    "Invoice Type": "Opening Balance",
                     "Particulars": (
                         f"B/F from {_fy_full_label(txn_fy - 1)}"
                         if txn_fy > fy_years[0]
@@ -918,8 +889,7 @@ def _build_fiscal_year_ledger_sections(
             opening = previous_closing
             opening_row = {
                 "Date": _format_ledger_date(period_start),
-                "Voucher Type": "Opening Balance",
-                "Voucher No.": "",
+                "Invoice Type": "Opening Balance",
                 "Particulars": (
                     f"B/F from {_fy_full_label(fy - 1)}"
                     if fy > first_fy
