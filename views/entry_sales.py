@@ -866,6 +866,7 @@ def _build_fiscal_year_ledger_sections(
     fy_totals: dict[int, dict[str, float]] = {
         year: {"total_debit": 0.0, "total_credit": 0.0} for year in fy_years
     }
+    fy_closing: dict[int, float] = {}
 
     current_fy: int | None = None
     for txn in transactions:
@@ -889,6 +890,7 @@ def _build_fiscal_year_ledger_sections(
                     "Balance (Dr/Cr)": utils.format_ledger_balance_dr_cr(opening),
                 }
                 fy_rows[txn_fy].append(opening_row)
+                fy_closing[txn_fy] = opening
             current_fy = txn_fy
 
         for line in txn["lines"]:
@@ -898,6 +900,7 @@ def _build_fiscal_year_ledger_sections(
             display_line = dict(line)
             display_line["Balance (Dr/Cr)"] = utils.format_ledger_balance_dr_cr(running_balance)
             fy_rows[txn_fy].append(display_line)
+            fy_closing[txn_fy] = running_balance
             if debit > 0.005:
                 fy_totals[txn_fy]["total_debit"] += debit
             if credit > 0.005:
@@ -928,15 +931,19 @@ def _build_fiscal_year_ledger_sections(
             }
             fy_rows[fy] = [opening_row]
             fy_totals.setdefault(fy, {"total_debit": 0.0, "total_credit": 0.0})
+            fy_closing[fy] = opening
         opening = fy_opening.get(fy, 0.0)
         totals = fy_totals.get(fy, {"total_debit": 0.0, "total_credit": 0.0})
-        previous_closing = opening + totals["total_debit"] - totals["total_credit"]
+        previous_closing = fy_closing.get(
+            fy,
+            opening + totals["total_debit"] - totals["total_credit"],
+        )
 
     sections: list[dict[str, object]] = []
     for fy in ordered_fys:
         opening = fy_opening.get(fy, 0.0)
         totals = fy_totals.get(fy, {"total_debit": 0.0, "total_credit": 0.0})
-        closing = opening + totals["total_debit"] - totals["total_credit"]
+        closing = fy_closing.get(fy, opening + totals["total_debit"] - totals["total_credit"])
         period_start, period_end = _fy_period_bounds(fy)
         sections.append(
             {
