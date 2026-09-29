@@ -635,12 +635,6 @@ def _format_ledger_date(value: object) -> str:
 
 
 def _expand_sale_fiscal_lines(row: pd.Series, *, invoice_ref: str, date_display: str) -> list[dict[str, object]]:
-    product = str(row.get("Product", "fly-ash bricks")).strip() or "fly-ash bricks"
-    hsn_code = str(row.get("HSN Code", "")).strip() or "6815"
-    qty = utils.safe_float(row.get("Qty", 0.0))
-    rate = utils.safe_float(row.get("Adjusted_Rate", row.get("Rate", 0.0)))
-    if rate <= 0 and qty > 0:
-        rate = utils.safe_float(row.get("Rate", 0.0))
     amount = utils.safe_float(row.get("Amount", 0.0))
     freight = utils.safe_float(row.get("Freight", 0.0))
     gst = utils.safe_float(
@@ -653,19 +647,17 @@ def _expand_sale_fiscal_lines(row: pd.Series, *, invoice_ref: str, date_display:
         gst,
         stored_total=stored_total,
     )
-    detail_lines = [
-        f"Invoice No: {invoice_ref}",
-        (
-            f"{product} (HSN {hsn_code}) | Qty {qty:,.0f} | "
-            f"Rate {rate:,.2f} | Selling Price {amount:,.2f}"
-        ),
-    ]
-    if freight > 0.005:
-        detail_lines.append(f"Freight: {freight:,.2f}")
-    detail_lines.append(f"GST @ {GST_RATE:.0f}%: {gst:,.2f}")
-    detail_lines.append(invoice_total_line)
     stored_value = utils.safe_float(stored_total, 0.0)
     exact_total = utils.round_down_2(amount + freight + gst)
+    if stored_value > 0.005:
+        total_amount_label = f"{int(utils.round_down_0(stored_value)):,}"
+    else:
+        total_amount_label = f"{int(utils.round_up_0(exact_total)):,}"
+    detail_lines = [
+        f"Invoice No: {invoice_ref}",
+        f"Total Amount: {total_amount_label}",
+        invoice_total_line,
+    ]
     if stored_value > 0.005:
         debit = float(utils.round_down_0(stored_value))
     else:
