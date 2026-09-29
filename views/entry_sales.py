@@ -896,7 +896,7 @@ def _build_fiscal_year_ledger_sections(
         for line in txn["lines"]:
             debit = utils.safe_float(line.get("Debit", 0.0))
             credit = utils.safe_float(line.get("Credit", 0.0))
-            running_balance += credit - debit
+            running_balance += debit - credit
             display_line = dict(line)
             display_line["Balance (Dr/Cr)"] = utils.format_ledger_balance_dr_cr(running_balance)
             fy_rows[txn_fy].append(display_line)
@@ -1843,7 +1843,10 @@ def render() -> None:
                 summary_cols = st.columns(3)
                 summary_cols[0].metric("Total Sales", f"{total_sales:,.2f}")
                 summary_cols[1].metric("Total Payments", f"{total_payments:,.2f}")
-                summary_cols[2].metric("Outstanding", f"{outstanding:,.2f}")
+                summary_cols[2].metric(
+                    "Outstanding",
+                    utils.format_ledger_balance_dr_cr(outstanding),
+                )
 
                 ledger_view = ledger_filtered[
                     [
@@ -1856,6 +1859,10 @@ def render() -> None:
                         "Running_Balance",
                     ]
                 ].rename(columns={"Date_Display": "Date", "Running_Balance": "Running Balance"})
+                ledger_view = ledger_view.copy()
+                ledger_view["Running Balance"] = ledger_filtered["Running_Balance"].apply(
+                    utils.format_ledger_balance_dr_cr
+                )
                 st.dataframe(ledger_view, use_container_width=True)
 
                 file_label = re.sub(r"[^A-Za-z0-9_-]+", "_", ledger_customer_label)
