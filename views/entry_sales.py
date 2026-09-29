@@ -685,24 +685,14 @@ def _expand_payment_fiscal_lines(
     row: pd.Series,
     *,
     date_display: str,
-    invoice_map: dict[str, str],
 ) -> list[dict[str, object]]:
     payment_id = str(row.get("Payment_ID", "")).strip()
     mode = str(row.get("Mode", "")).strip()
     applied = _payment_applied_amount(row)
-    raw_invoice_ref = str(row.get("Invoice_No", "")).strip()
-    if raw_invoice_ref:
-        invoice_parts = [part.strip() for part in raw_invoice_ref.split(",") if part.strip()]
-        invoice_refs = [invoice_map.get(part, part) for part in invoice_parts]
-    else:
-        invoice_refs = []
     detail_lines = [f"Receipt No: {payment_id}"]
     if mode:
-        detail_lines.append(f"Payment received ({mode})")
-    else:
-        detail_lines.append("Payment received")
-    if invoice_refs:
-        detail_lines.append(f"Against Invoice(s): {', '.join(invoice_refs)}")
+        detail_lines.append(f"Mode: {mode}")
+    detail_lines.append(f"Amount: {applied:,.2f}")
     return [
         {
             "Date": date_display,
@@ -822,7 +812,6 @@ def _build_fiscal_year_ledger_sections(
                     row,
                     date_display=str(payment_date_display.loc[idx]).strip()
                     or _format_ledger_date(txn_date_value),
-                    invoice_map=invoice_map,
                 ),
             }
         )
